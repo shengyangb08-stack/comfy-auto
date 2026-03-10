@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
+import os
 import sys
 
 if sys.platform == "win32":
@@ -12,6 +14,21 @@ if sys.platform == "win32":
 from contentcheck.models import MODEL_REGISTRY
 from contentcheck.models.base import BaseChecker
 from contentcheck.pipeline import is_image, run, run_image
+
+_KEYS_FILENAME = "api_keys.json"
+
+
+def _load_api_keys() -> dict[str, str]:
+    search_dirs = [
+        os.getcwd(),
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    ]
+    for d in search_dirs:
+        path = os.path.join(d, _KEYS_FILENAME)
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+    return {}
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -24,8 +41,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "--models",
         nargs="+",
         choices=list(MODEL_REGISTRY.keys()),
-        default=["mediapipe"],
-        help="Which detection models to run (default: mediapipe). "
+        default=["llm-gemini"],
+        help="Which detection models to run (default: llm-gemini). "
              f"Available: {', '.join(MODEL_REGISTRY.keys())}",
     )
     p.add_argument(
@@ -57,14 +74,15 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _instantiate_checkers(args: argparse.Namespace) -> list[BaseChecker]:
+    keys = _load_api_keys()
     checkers: list[BaseChecker] = []
     for name in args.models:
         cls = MODEL_REGISTRY[name]
         kwargs: dict = {}
-        if name == "llm-gemini" and args.gemini_api_key:
-            kwargs["api_key"] = args.gemini_api_key
-        elif name == "llm-grok" and args.grok_api_key:
-            kwargs["api_key"] = args.grok_api_key
+        if name == "llm-gemini":
+            kwargs["api_key"] = args.gemini_api_key or keys.get("gemini") or None
+        elif name == "llm-grok":
+            kwargs["api_key"] = args.grok_api_key or keys.get("grok") or None
         try:
             checkers.append(cls(**kwargs))
         except Exception as exc:
