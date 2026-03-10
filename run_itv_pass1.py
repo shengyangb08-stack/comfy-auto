@@ -12,17 +12,32 @@ Example:
 """
 
 import json
+import os
 import sys
 import time
 import urllib.request
 import urllib.error
 
 COMFYUI_URL = "http://127.0.0.1:8188"
-WORKFLOW_PATH = r"ComfyUI\user\default\workflows\ITV_pass1_API.json"
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.dirname(_SCRIPT_DIR)
+WORKFLOW_PATH = os.path.join(_PROJECT_ROOT, "ComfyUI", "user", "default", "workflows", "ITV_pass1_API.json")
 LOAD_IMAGE_NODE_ID = "62"
 
 
 def check_server():
+    import socket
+    from urllib.parse import urlparse
+    parsed = urlparse(COMFYUI_URL)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or 8188
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(3)
+    try:
+        sock.connect((host, port))
+        sock.close()
+    except (OSError, socket.timeout):
+        return False
     try:
         urllib.request.urlopen(f"{COMFYUI_URL}/system_stats", timeout=5)
         return True
