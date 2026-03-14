@@ -60,7 +60,8 @@ def _parse_llm_json(text: str) -> dict:
 class GeminiChecker(BaseChecker):
     name = "llm-gemini"
 
-    def __init__(self, *, api_key: str | None = None, **_kwargs: object) -> None:
+    def __init__(self, *, api_key: str | None = None,
+                 prompt: str | None = None, **_kwargs: object) -> None:
         from google import genai
 
         key = api_key or os.environ.get("GEMINI_API_KEY", "")
@@ -70,12 +71,13 @@ class GeminiChecker(BaseChecker):
             )
         self._client = genai.Client(api_key=key)
         self._model = "gemini-3-flash-preview"
+        self._prompt = prompt or _PROMPT
 
     def check(self, frame: np.ndarray) -> ModelResult:
         image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         response = self._client.models.generate_content(
             model=self._model,
-            contents=[_PROMPT, image],
+            contents=[self._prompt, image],
         )
         parsed = _parse_llm_json(response.text)
         score = float(parsed.get("score", 0.5))

@@ -19,9 +19,11 @@ _KEYS_FILENAME = "api_keys.json"
 
 
 def _load_api_keys() -> dict[str, str]:
+    _this_dir = os.path.dirname(os.path.abspath(__file__))
     search_dirs = [
         os.getcwd(),
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        os.path.dirname(_this_dir),                # contentCheck/
+        os.path.dirname(os.path.dirname(_this_dir)),  # comfy_auto/
     ]
     for d in search_dirs:
         path = os.path.join(d, _KEYS_FILENAME)
