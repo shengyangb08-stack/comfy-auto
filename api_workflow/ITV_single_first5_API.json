@@ -1,0 +1,742 @@
+{
+  "37": {
+    "inputs": {
+      "unet_name": "wan2.2\\Wan2_2-I2V-A14B-HIGH_SVI_consistent_face_nsfw_fp8.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model high"
+    }
+  },
+  "56": {
+    "inputs": {
+      "unet_name": "wan2.2\\Wan2_2-I2V-A14B-LOW_SVI_consistent_face_nsfw_fp8.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Load Diffusion Model low"
+    }
+  },
+  "193": {
+    "inputs": {
+      "value": 1
+    },
+    "class_type": "INTConstant",
+    "_meta": {
+      "title": "no lightning end step"
+    }
+  },
+  "194": {
+    "inputs": {
+      "value": 4
+    },
+    "class_type": "INTConstant",
+    "_meta": {
+      "title": "lightning high end step"
+    }
+  },
+  "195": {
+    "inputs": {
+      "value": 7
+    },
+    "class_type": "INTConstant",
+    "_meta": {
+      "title": "total step"
+    }
+  },
+  "275": {
+    "inputs": {
+      "PowerLoraLoaderHeaderWidget": {
+        "type": "PowerLoraLoaderHeaderWidget"
+      },
+      "➕ Add Lora": "",
+      "model": [
+        "368:359",
+        0
+      ]
+    },
+    "class_type": "Power Lora Loader (rgthree)",
+    "_meta": {
+      "title": "lora lightning high"
+    }
+  },
+  "276": {
+    "inputs": {
+      "PowerLoraLoaderHeaderWidget": {
+        "type": "PowerLoraLoaderHeaderWidget"
+      },
+      "➕ Add Lora": "",
+      "model": [
+        "368:365",
+        0
+      ]
+    },
+    "class_type": "Power Lora Loader (rgthree)",
+    "_meta": {
+      "title": "lora lightning low"
+    }
+  },
+  "314": {
+    "inputs": {
+      "value": 4
+    },
+    "class_type": "FloatConstant",
+    "_meta": {
+      "title": "cfg first ksampler without lightning"
+    }
+  },
+  "325": {
+    "inputs": {
+      "PowerLoraLoaderHeaderWidget": {
+        "type": "PowerLoraLoaderHeaderWidget"
+      },
+      "➕ Add Lora": "",
+      "model": [
+        "368:366",
+        0
+      ]
+    },
+    "class_type": "Power Lora Loader (rgthree)",
+    "_meta": {
+      "title": "lora no lightning high"
+    }
+  },
+  "369": {
+    "inputs": {
+      "unet_name": "wan22EnhancedNSFWSVICamera_nolightningSVICfQ8H.gguf"
+    },
+    "class_type": "UnetLoaderGGUF",
+    "_meta": {
+      "title": "Unet Loader (GGUF) HIGH"
+    }
+  },
+  "370": {
+    "inputs": {
+      "unet_name": "wan22EnhancedNSFWSVICamera_nolightningSVICfQ8L.gguf"
+    },
+    "class_type": "UnetLoaderGGUF",
+    "_meta": {
+      "title": "Unet Loader (GGUF) LOW"
+    }
+  },
+  "512": {
+    "inputs": {
+      "frame_rate": 16,
+      "loop_count": 0,
+      "filename_prefix": "wan22_14_21-55-15/final",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 18,
+      "save_metadata": true,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": true,
+      "images": [
+        "562:561",
+        0
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "video"
+    }
+  },
+  "533": {
+    "inputs": {
+      "switch": true,
+      "on_false": [
+        "562:551",
+        0
+      ],
+      "on_true": [
+        "562:557",
+        0
+      ]
+    },
+    "class_type": "LazySwitchKJ",
+    "_meta": {
+      "title": "2ksampler:false/3ksampler:true"
+    }
+  },
+  "564": {
+    "inputs": {
+      "value": 6
+    },
+    "class_type": "INTConstant",
+    "_meta": {
+      "title": "total step double ksampler"
+    }
+  },
+  "566": {
+    "inputs": {
+      "value": 3
+    },
+    "class_type": "INTConstant",
+    "_meta": {
+      "title": "step high double K"
+    }
+  },
+  "759": {
+    "inputs": {
+      "string_a": "The man's penis then enters the woman's anus. The man's penis makes continuous and repetitive in-and-out movements inside the woman's anus. She rides a penis, moving her body up and down as the penis enters and exits her anus.",
+      "string_b": "",
+      "delimiter": ""
+    },
+    "class_type": "StringConcatenate",
+    "_meta": {
+      "title": "Concatenate"
+    }
+  },
+  "760": {
+    "inputs": {
+      "text": "The man's penis then enters the woman's anus. The man's penis makes continuous and repetitive in-and-out movements inside the woman's anus. She rides a penis, moving her body up and down as the penis enters and exits her anus.",
+      "anything": [
+        "759",
+        0
+      ]
+    },
+    "class_type": "easy showAnything",
+    "_meta": {
+      "title": "Show Any"
+    }
+  },
+  "761": {
+    "inputs": {
+      "text": [
+        "760",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Prompt)"
+    }
+  },
+  "762": {
+    "inputs": {
+      "switch": true,
+      "on_true": [
+        "761",
+        0
+      ]
+    },
+    "class_type": "LazySwitchKJ",
+    "_meta": {
+      "title": "auto_prompt:true/manual:false"
+    }
+  },
+  "771": {
+    "inputs": {
+      "filename_prefix": "wan22_14_21-55-15/latent",
+      "samples": [
+        "533",
+        0
+      ]
+    },
+    "class_type": "SaveLatent",
+    "_meta": {
+      "title": "SaveLatent"
+    }
+  },
+  "773": {
+    "inputs": {
+      "filename_prefix": "wan22_14_21-55-15/pre_image/pre",
+      "images": [
+        "562:561",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  },
+  "774": {
+    "inputs": {
+      "image": "00010-1741776828-50.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Load Anchor Image"
+    }
+  },
+  "775": {
+    "inputs": {
+      "desired_width": 1024,
+      "desired_height": 1024,
+      "divisible_by": 64,
+      "upscale": false,
+      "upscale_method": "lanczos",
+      "small_image_mode": "none",
+      "pad_color": "#000000",
+      "image": [
+        "774",
+        0
+      ]
+    },
+    "class_type": "FindPerfectResolution",
+    "_meta": {
+      "title": "Find Perfect Resolution"
+    }
+  },
+  "777": {
+    "inputs": {
+      "pixels": [
+        "775",
+        2
+      ],
+      "vae": [
+        "368:353",
+        0
+      ]
+    },
+    "class_type": "VAEEncode",
+    "_meta": {
+      "title": "VAE Encode"
+    }
+  },
+  "368:366": {
+    "inputs": {
+      "lora_name": "SVI_v2_PRO_Wan2.2-I2V-A14B_HIGH_lora_rank_128_fp16.safetensors",
+      "strength_model": 1,
+      "model": [
+        "368:364",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "svi pro high"
+    }
+  },
+  "368:356": {
+    "inputs": {
+      "lora_name": "SVI_v2_PRO_Wan2.2-I2V-A14B_LOW_lora_rank_128_fp16.safetensors",
+      "strength_model": 1,
+      "model": [
+        "368:363",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "svi pro low"
+    }
+  },
+  "368:359": {
+    "inputs": {
+      "lora_name": "lightx2v_I2V_14B_480p_cfg_step_distill_rank128_bf16.safetensors",
+      "strength_model": 1,
+      "model": [
+        "368:366",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "lightning high"
+    }
+  },
+  "368:365": {
+    "inputs": {
+      "lora_name": "wan2.2_i2v_A14b_low_noise_lora_rank64_lightx2v_4step_1022.safetensors",
+      "strength_model": 1,
+      "model": [
+        "368:356",
+        0
+      ]
+    },
+    "class_type": "LoraLoaderModelOnly",
+    "_meta": {
+      "title": "lightning low"
+    }
+  },
+  "368:355": {
+    "inputs": {
+      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "type": "wan",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Load CLIP"
+    }
+  },
+  "368:353": {
+    "inputs": {
+      "vae_name": "wan_2.1_vae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Load VAE"
+    }
+  },
+  "368:360": {
+    "inputs": {
+      "sage_attention": "auto",
+      "allow_compile": false,
+      "model": [
+        "369",
+        0
+      ]
+    },
+    "class_type": "PathchSageAttentionKJ",
+    "_meta": {
+      "title": "Patch Sage Attention KJ"
+    }
+  },
+  "368:361": {
+    "inputs": {
+      "enable_fp16_accumulation": true,
+      "model": [
+        "368:360",
+        0
+      ]
+    },
+    "class_type": "ModelPatchTorchSettings",
+    "_meta": {
+      "title": "Model Patch Torch high"
+    }
+  },
+  "368:362": {
+    "inputs": {
+      "sage_attention": "auto",
+      "allow_compile": false,
+      "model": [
+        "370",
+        0
+      ]
+    },
+    "class_type": "PathchSageAttentionKJ",
+    "_meta": {
+      "title": "Patch Sage Attention KJ"
+    }
+  },
+  "368:363": {
+    "inputs": {
+      "enable_fp16_accumulation": true,
+      "model": [
+        "368:362",
+        0
+      ]
+    },
+    "class_type": "ModelPatchTorchSettings",
+    "_meta": {
+      "title": "Model Patch Torch low"
+    }
+  },
+  "368:364": {
+    "inputs": {
+      "shift": 8,
+      "model": [
+        "368:361",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingSD3",
+    "_meta": {
+      "title": "ModelSamplingSD3"
+    }
+  },
+  "562:553": {
+    "inputs": {
+      "text": "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走, 说话, 说吧, 唱歌, 猫\n",
+      "clip": [
+        "368:355",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Negative Prompt)"
+    }
+  },
+  "562:550": {
+    "inputs": {
+      "seed": 660853167207422
+    },
+    "class_type": "Seed (rgthree)",
+    "_meta": {
+      "title": "Seed (rgthree)"
+    }
+  },
+  "562:557": {
+    "inputs": {
+      "add_noise": "disable",
+      "noise_seed": [
+        "562:550",
+        0
+      ],
+      "steps": [
+        "195",
+        0
+      ],
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "start_at_step": [
+        "194",
+        0
+      ],
+      "end_at_step": 1000,
+      "return_with_leftover_noise": "disable",
+      "model": [
+        "276",
+        0
+      ],
+      "positive": [
+        "562:554",
+        0
+      ],
+      "negative": [
+        "562:554",
+        1
+      ],
+      "latent_image": [
+        "562:556",
+        0
+      ]
+    },
+    "class_type": "KSamplerAdvanced",
+    "_meta": {
+      "title": "KSampler (Advanced) svi lightning low"
+    }
+  },
+  "562:556": {
+    "inputs": {
+      "add_noise": "disable",
+      "noise_seed": [
+        "562:550",
+        0
+      ],
+      "steps": [
+        "195",
+        0
+      ],
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "start_at_step": [
+        "193",
+        0
+      ],
+      "end_at_step": [
+        "194",
+        0
+      ],
+      "return_with_leftover_noise": "enable",
+      "model": [
+        "275",
+        0
+      ],
+      "positive": [
+        "562:554",
+        0
+      ],
+      "negative": [
+        "562:554",
+        1
+      ],
+      "latent_image": [
+        "562:559",
+        0
+      ]
+    },
+    "class_type": "KSamplerAdvanced",
+    "_meta": {
+      "title": "KSampler (Advanced) svi lightning high"
+    }
+  },
+  "562:552": {
+    "inputs": {
+      "text": "The man's penis then enters the woman's anus. The man's penis makes continuous and repetitive in-and-out movements inside the woman's anus. She rides a penis, moving her body up and down as the penis enters and exits her anus.",
+      "clip": [
+        "368:355",
+        0
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "CLIP Text Encode (Positive Prompt)"
+    }
+  },
+  "562:561": {
+    "inputs": {
+      "samples": [
+        "533",
+        0
+      ],
+      "vae": [
+        "368:353",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE Decode"
+    }
+  },
+  "562:555": {
+    "inputs": {
+      "length": 81,
+      "motion_latent_count": 0,
+      "positive": [
+        "562:552",
+        0
+      ],
+      "negative": [
+        "562:553",
+        0
+      ],
+      "anchor_samples": [
+        "777",
+        0
+      ]
+    },
+    "class_type": "WanImageToVideoSVIPro",
+    "_meta": {
+      "title": "WanImageToVideoSVIPro"
+    }
+  },
+  "562:554": {
+    "inputs": {
+      "length": 81,
+      "motion_latent_count": 0,
+      "positive": [
+        "562:552",
+        0
+      ],
+      "negative": [
+        "562:553",
+        0
+      ],
+      "anchor_samples": [
+        "777",
+        0
+      ]
+    },
+    "class_type": "WanImageToVideoSVIPro",
+    "_meta": {
+      "title": "WanImageToVideoSVIPro"
+    }
+  },
+  "562:559": {
+    "inputs": {
+      "add_noise": "enable",
+      "noise_seed": [
+        "562:550",
+        0
+      ],
+      "steps": [
+        "195",
+        0
+      ],
+      "cfg": [
+        "314",
+        0
+      ],
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "start_at_step": 0,
+      "end_at_step": [
+        "193",
+        0
+      ],
+      "return_with_leftover_noise": "enable",
+      "model": [
+        "325",
+        0
+      ],
+      "positive": [
+        "562:554",
+        0
+      ],
+      "negative": [
+        "562:554",
+        1
+      ],
+      "latent_image": [
+        "562:554",
+        2
+      ]
+    },
+    "class_type": "KSamplerAdvanced",
+    "_meta": {
+      "title": "KSampler (Advanced) just svi"
+    }
+  },
+  "562:551": {
+    "inputs": {
+      "add_noise": "disable",
+      "noise_seed": [
+        "562:550",
+        0
+      ],
+      "steps": 6,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "start_at_step": 3,
+      "end_at_step": 1000,
+      "return_with_leftover_noise": "disable",
+      "model": [
+        "276",
+        0
+      ],
+      "positive": [
+        "562:555",
+        0
+      ],
+      "negative": [
+        "562:555",
+        1
+      ],
+      "latent_image": [
+        "562:560",
+        0
+      ]
+    },
+    "class_type": "KSamplerAdvanced",
+    "_meta": {
+      "title": "KSampler (Advanced) svi lightning low"
+    }
+  },
+  "562:560": {
+    "inputs": {
+      "add_noise": "enable",
+      "noise_seed": [
+        "562:550",
+        0
+      ],
+      "steps": 6,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "start_at_step": 0,
+      "end_at_step": 3,
+      "return_with_leftover_noise": "enable",
+      "model": [
+        "275",
+        0
+      ],
+      "positive": [
+        "562:555",
+        0
+      ],
+      "negative": [
+        "562:555",
+        1
+      ],
+      "latent_image": [
+        "562:555",
+        2
+      ]
+    },
+    "class_type": "KSamplerAdvanced",
+    "_meta": {
+      "title": "KSampler (Advanced) svi lightning high"
+    }
+  }
+}

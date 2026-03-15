@@ -18,7 +18,6 @@ import json
 import os
 import random
 import shutil
-import subprocess
 import sys
 import time
 
@@ -113,26 +112,20 @@ def _copy_image_to_comfyui_input(image_path: str, dest_name: str) -> str:
 
 def _find_output_video(history: dict) -> str | None:
     """Find the first .mp4 output file from a ComfyUI history record."""
-    for _nid, node_out in history.get("outputs", {}).items():
-        for _key, items in node_out.items():
-            if not isinstance(items, list):
-                continue
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
-                fname = item.get("filename", "")
-                if fname.endswith(".mp4"):
-                    subfolder = item.get("subfolder", "")
-                    if subfolder:
-                        return os.path.join(_COMFYUI_OUTPUT, subfolder, fname)
-                    return os.path.join(_COMFYUI_OUTPUT, fname)
-    return None
+    from run_itv_director import find_output_video
+    return find_output_video(history, _COMFYUI_OUTPUT)
 
 
 def _find_output_latent(history: dict) -> str | None:
     """Find the saved .latent file from a ComfyUI history record."""
-    from run_itv_pass1 import extract_saved_latent
-    return extract_saved_latent(history)
+    from run_itv_director import extract_saved_latent
+    return extract_saved_latent(history, _COMFYUI_OUTPUT)
+
+
+def _find_output_saved_images(history: dict, save_image_id: str = "773") -> list[str]:
+    """Find all saved images from SaveImage node (for next segment's extend input)."""
+    from run_itv_director import extract_saved_images
+    return extract_saved_images(history, save_image_id, _COMFYUI_OUTPUT)
 
 
 def extract_frames_at_1fps(video_path: str) -> list[np.ndarray]:
@@ -177,40 +170,6 @@ def extract_last_frame(video_path: str) -> np.ndarray:
     if last_frame is None:
         raise RuntimeError(f"Failed to read any frame from {video_path}")
     return last_frame
-
-
-def _get_ffmpeg_path() -> str:
-    """Get ffmpeg binary path from imageio_ffmpeg (bundled with ComfyUI)."""
-    try:
-        from imageio_ffmpeg import get_ffmpeg_exe
-        return get_ffmpeg_exe()
-    except ImportError:
-        pass
-    if shutil.which("ffmpeg"):
-        return "ffmpeg"
-    raise RuntimeError(
-        "ffmpeg not found. Install imageio-ffmpeg or add ffmpeg to PATH."
-    )
-
-
-def concatenate_videos(video_paths: list[str], output_path: str) -> None:
-    """Concatenate multiple mp4 files using ffmpeg concat demuxer."""
-    ffmpeg = _get_ffmpeg_path()
-    list_file = output_path + ".concat.txt"
-    try:
-        with open(list_file, "w", encoding="utf-8") as f:
-            for vp in video_paths:
-                safe = vp.replace("'", "'\\''")
-                f.write(f"file '{safe}'\n")
-        cmd = [
-            ffmpeg, "-y", "-f", "concat", "-safe", "0",
-            "-i", list_file, "-c", "copy", output_path,
-        ]
-        subprocess.run(cmd, check=True, capture_output=True)
-        print(f"  Concatenated {len(video_paths)} segments -> {output_path}")
-    finally:
-        if os.path.isfile(list_file):
-            os.remove(list_file)
 
 
 # ── Content check ────────────────────────────────────────────────────
@@ -300,7 +259,7 @@ def main() -> None:
         print(f"ERROR: Image not found: {args.image}", file=sys.stderr)
         sys.exit(1)
 
-    from run_itv_pass1 import run_workflow, check_server, COMFYUI_URL
+    from run_itv_director import run_first5, run_extend5, check_server, COMFYUI_URL
     from autoprompt import generate_prompt
 
     if not check_server():
@@ -334,13 +293,20 @@ def main() -> None:
         "final_video": None,
     }
 
-    current_image_path = os.path.abspath(args.image)
+    # Anchor image: original input, used for all segments (character reference)
+    anchor_image_path = os.path.abspath(args.image)
+    anchor_basename = f"director_anchor_{os.path.basename(anchor_image_path)}"
+    _copy_image_to_comfyui_input(anchor_image_path, anchor_basename)
+    print(f"  Anchor image (for run): {anchor_basename}")
+
+    current_image_path = anchor_image_path  # for seg 1; seg 2+ = last saved image (for autoprompt)
     current_prompt = args.prompt
-    segment_videos: list[str] = []
-    prev_latent_path: str | None = None  # for segments 2+
+    prev_images_folder: str | None = None  # session_dir/seg_XX/ for extend (LoadImagesFromFolderKJ)
+    prev_latent_basename: str | None = None  # filename in ComfyUI/input/ for extend
 
     for seg_idx in range(1, NUM_SEGMENTS + 1):
         seg_label = f"seg_{seg_idx:02d}"
+        seg_images_dir = os.path.join(session_dir, seg_label)  # where we store this segment's images
         print("=" * 70)
         print(f"  SEGMENT {seg_idx}/{NUM_SEGMENTS}")
         print("=" * 70)
@@ -359,10 +325,13 @@ def main() -> None:
             prompt_preview = current_prompt[:120].replace("\n", " ")
             print(f"  Autoprompt: {prompt_preview}...")
 
-        # Copy current image into ComfyUI/input/
-        img_basename = f"director_{seg_label}_{os.path.basename(current_image_path)}"
-        print(f"  Input image: {os.path.basename(current_image_path)}")
-        _copy_image_to_comfyui_input(current_image_path, img_basename)
+        # Seg 1: first5 uses source image. Seg 2+: extend5 uses prev_images_folder + prev_latent + anchor
+        if seg_idx == 1:
+            img_basename = f"director_{seg_label}_source_{os.path.basename(current_image_path)}"
+            print(f"  Source: single image {os.path.basename(current_image_path)}")
+            _copy_image_to_comfyui_input(current_image_path, img_basename)
+        else:
+            print(f"  Extend: prev images from {prev_images_folder}, latent={prev_latent_basename}")
 
         seg_record: dict = {
             "segment": seg_idx,
@@ -388,16 +357,28 @@ def main() -> None:
             }
 
             try:
-                history = run_workflow(
-                    img_basename,
-                    steps=args.steps,
-                    cfg=args.cfg,
-                    prompt=current_prompt,
-                    seed=seed,
-                    filename_prefix=f"director_{seg_label}",
-                    prev_latent_path=prev_latent_path,
-                    latent_filename_prefix=f"latents/director_{seg_label}",
-                )
+                if seg_idx == 1:
+                    history = run_first5(
+                        img_basename,
+                        prompt=current_prompt,
+                        seed=seed,
+                        steps=args.steps,
+                        cfg=args.cfg,
+                        filename_prefix=f"director_{seg_label}",
+                        latent_filename_prefix=f"director_{seg_label}",
+                    )
+                else:
+                    history = run_extend5(
+                        anchor_basename,
+                        prev_images_folder,
+                        prev_latent_basename,
+                        prompt=current_prompt,
+                        seed=seed,
+                        steps=args.steps,
+                        cfg=args.cfg,
+                        filename_prefix=f"director_{seg_label}",
+                        latent_filename_prefix=f"director_{seg_label}",
+                    )
             except RuntimeError as exc:
                 print(f"  Workflow error: {exc}")
                 attempt_record["status"] = "workflow_error"
@@ -438,10 +419,9 @@ def main() -> None:
             else:
                 check_results = []
 
-            # Success — copy video to session dir
+            # Success — copy video and images to session dir (all in run folder)
             seg_video_path = os.path.join(session_dir, f"{seg_label}.mp4")
             shutil.copy2(video_src, seg_video_path)
-            segment_videos.append(seg_video_path)
 
             attempt_record["status"] = "success"
             seg_record["attempts"].append(attempt_record)
@@ -450,24 +430,39 @@ def main() -> None:
             seg_record["content_check"] = check_results
             succeeded = True
 
-            # Extract last frame for next segment
-            last_frame = extract_last_frame(video_src)
-            last_frame_name = f"{seg_label}_lastframe.png"
-            last_frame_path = os.path.join(session_dir, last_frame_name)
-            cv2.imwrite(last_frame_path, last_frame)
-            current_image_path = last_frame_path
-            print(f"  Saved last frame: {last_frame_name}")
+            # Copy saved images to session_dir/seg_XX/ for next segment's extend
+            saved_images = _find_output_saved_images(history)
+            next_seg = seg_idx + 1
+            if saved_images and next_seg <= NUM_SEGMENTS:
+                os.makedirs(seg_images_dir, exist_ok=True)
+                for i, src in enumerate(saved_images):
+                    if os.path.isfile(src):
+                        ext = os.path.splitext(src)[1]
+                        dest = os.path.join(seg_images_dir, f"frame_{i:05d}{ext}")
+                        shutil.copy2(src, dest)
+                prev_images_folder = seg_images_dir
+                current_image_path = saved_images[-1]
+                print(f"  Saved {len(saved_images)} images to {seg_label}/ for seg {next_seg}")
+            elif next_seg <= NUM_SEGMENTS:
+                # Fallback: extract last frame from video
+                last_frame = extract_last_frame(video_src)
+                fallback_img = os.path.join(seg_images_dir, "frame_00000.png")
+                os.makedirs(seg_images_dir, exist_ok=True)
+                cv2.imwrite(fallback_img, last_frame)
+                prev_images_folder = seg_images_dir
+                current_image_path = fallback_img
+                print(f"  Saved fallback frame for seg {next_seg} from video")
 
-            # Copy saved latent to ComfyUI/input for next segment (latent continuity)
+            # Copy latent to session dir and ComfyUI/input for next segment
             latent_src = _find_output_latent(history)
             if latent_src and os.path.isfile(latent_src):
-                next_seg = seg_idx + 1
+                session_latent = os.path.join(session_dir, f"{seg_label}.latent")
+                shutil.copy2(latent_src, session_latent)
                 if next_seg <= NUM_SEGMENTS:
-                    prev_latent_name = f"director_seg_{next_seg:02d}_prev.latent"
-                    prev_latent_dest = os.path.join(_COMFYUI_INPUT, prev_latent_name)
+                    prev_latent_basename = f"director_seg_{next_seg:02d}_prev.latent"
+                    prev_latent_dest = os.path.join(_COMFYUI_INPUT, prev_latent_basename)
                     shutil.copy2(latent_src, prev_latent_dest)
-                    prev_latent_path = prev_latent_dest
-                    print(f"  Saved prev latent for seg {next_seg}: {prev_latent_name}")
+                    print(f"  Saved latent for seg {next_seg}: {prev_latent_basename}")
             break
 
         if not succeeded:
@@ -480,23 +475,21 @@ def main() -> None:
         manifest["segments"].append(seg_record)
         print(f"\n  Segment {seg_idx} complete.\n")
 
-    # ── Concatenation ─────────────────────────────────────────────────
+    # ── Final video ───────────────────────────────────────────────────
+    # Extend workflow combines video internally; seg_06 output = full 30s
 
-    if len(segment_videos) == NUM_SEGMENTS:
-        print("=" * 70)
-        print("  CONCATENATING")
-        print("=" * 70)
+    completed = sum(1 for s in manifest["segments"] if s.get("video_file"))
+    if completed == NUM_SEGMENTS:
+        final_seg_video = os.path.join(session_dir, "seg_06.mp4")
         final_path = os.path.join(session_dir, "final_30s.mp4")
-        try:
-            concatenate_videos(segment_videos, final_path)
+        if os.path.isfile(final_seg_video):
+            shutil.copy2(final_seg_video, final_path)
             manifest["final_video"] = "final_30s.mp4"
             print(f"\n  Final video: {final_path}")
-        except Exception as exc:
-            print(f"  Concatenation failed: {exc}")
+        else:
             manifest["final_video"] = None
     else:
-        print(f"\n  Only {len(segment_videos)}/{NUM_SEGMENTS} segments completed."
-              f" Skipping concatenation.")
+        print(f"\n  Only {completed}/{NUM_SEGMENTS} segments completed.")
         manifest["final_video"] = None
 
     # ── Write manifest ────────────────────────────────────────────────
