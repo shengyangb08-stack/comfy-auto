@@ -259,7 +259,13 @@ def main() -> None:
         print(f"ERROR: Image not found: {args.image}", file=sys.stderr)
         sys.exit(1)
 
-    from run_itv_director import run_first5, run_extend5, check_server, COMFYUI_URL
+    from run_itv_director import (
+        run_first5,
+        run_extend5,
+        check_server,
+        COMFYUI_URL,
+        get_image_size,
+    )
     from autoprompt import generate_prompt
 
     if not check_server():
@@ -303,6 +309,8 @@ def main() -> None:
     current_prompt = args.prompt
     prev_images_folder: str | None = None  # session_dir/seg_XX/ for extend (LoadImagesFromFolderKJ)
     prev_latent_basename: str | None = None  # filename in ComfyUI/input/ for extend
+    prev_width: int | None = None  # resolution from previous segment (for extend)
+    prev_height: int | None = None
 
     for seg_idx in range(1, NUM_SEGMENTS + 1):
         seg_label = f"seg_{seg_idx:02d}"
@@ -368,12 +376,19 @@ def main() -> None:
                         latent_filename_prefix=f"director_{seg_label}",
                     )
                 else:
+                    if prev_width is None or prev_height is None:
+                        raise RuntimeError(
+                            "Extend requires prev_width/prev_height from previous segment. "
+                            "Ensure seg 1 completed and saved images."
+                        )
                     history = run_extend5(
                         anchor_basename,
                         prev_images_folder,
                         prev_latent_basename,
                         prompt=current_prompt,
                         seed=seed,
+                        width=prev_width,
+                        height=prev_height,
                         steps=args.steps,
                         cfg=args.cfg,
                         filename_prefix=f"director_{seg_label}",
@@ -442,7 +457,13 @@ def main() -> None:
                         shutil.copy2(src, dest)
                 prev_images_folder = seg_images_dir
                 current_image_path = saved_images[-1]
-                print(f"  Saved {len(saved_images)} images to {seg_label}/ for seg {next_seg}")
+                # Get resolution from first image for next extend (must match prev latent)
+                sz = get_image_size(saved_images[0])
+                if sz:
+                    prev_width, prev_height = sz
+                    print(f"  Saved {len(saved_images)} images to {seg_label}/ for seg {next_seg} (res {prev_width}x{prev_height})")
+                else:
+                    print(f"  Saved {len(saved_images)} images to {seg_label}/ for seg {next_seg}")
             elif next_seg <= NUM_SEGMENTS:
                 # Fallback: extract last frame from video
                 last_frame = extract_last_frame(video_src)
@@ -451,6 +472,9 @@ def main() -> None:
                 cv2.imwrite(fallback_img, last_frame)
                 prev_images_folder = seg_images_dir
                 current_image_path = fallback_img
+                sz = get_image_size(fallback_img)
+                if sz:
+                    prev_width, prev_height = sz
                 print(f"  Saved fallback frame for seg {next_seg} from video")
 
             # Copy latent to session dir and ComfyUI/input for next segment

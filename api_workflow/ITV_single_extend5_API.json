@@ -247,21 +247,18 @@
   },
   "775": {
     "inputs": {
-      "desired_width": 360,
-      "desired_height": 512,
-      "divisible_by": 64,
-      "upscale": false,
-      "upscale_method": "lanczos",
-      "small_image_mode": "none",
-      "pad_color": "#000000",
       "image": [
         "774",
         0
-      ]
+      ],
+      "upscale_method": "lanczos",
+      "width": 360,
+      "height": 512,
+      "crop": "center"
     },
-    "class_type": "FindPerfectResolution",
+    "class_type": "ImageScale",
     "_meta": {
-      "title": "Find Perfect Resolution"
+      "title": "Resize Anchor to Match Prev Latent"
     }
   },
   "789": {
@@ -357,7 +354,7 @@
     "inputs": {
       "pixels": [
         "775",
-        2
+        0
       ],
       "vae": [
         "368:353",

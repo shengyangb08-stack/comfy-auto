@@ -45,6 +45,7 @@ NODE_FIRST5 = {
 # Extend5: prev latent + prev images folder + anchor image
 NODE_EXTEND5 = {
     "anchor_image": "774",
+    "resize_anchor": "775",  # ImageScale - exact dimensions to match prev latent
     "load_latent": "792",
     "load_images_folder": "793",
     "save_image": "773",
@@ -180,6 +181,19 @@ def extract_saved_images(history: dict, save_image_id: str = "773",
     return paths
 
 
+def get_image_size(image_path: str) -> tuple[int, int] | None:
+    """Return (width, height) of an image file. Use exact dimensions to match prev latent."""
+    try:
+        import cv2
+        img = cv2.imread(image_path)
+        if img is not None:
+            h, w = img.shape[:2]
+            return (w, h)
+    except Exception:
+        pass
+    return None
+
+
 def find_output_video(history: dict, output_dir: str | None = None) -> str | None:
     """Find the first .mp4 output file from a ComfyUI history record."""
     out = output_dir or COMFYUI_OUTPUT_DIR
@@ -249,6 +263,8 @@ def run_extend5(
     *,
     prompt: str,
     seed: int,
+    width: int | None = None,
+    height: int | None = None,
     steps: int | None = None,
     cfg: float | None = None,
     filename_prefix: str | None = None,
@@ -259,8 +275,8 @@ def run_extend5(
     - anchor_image: original source image of the run (for anchor latent)
     - prev_images_folder: absolute path to folder with previous segment's images
     - prev_latent_basename: filename of .latent in ComfyUI/input/ (copy there before calling)
-
-    The workflow combines previous + new video internally. Returns history dict.
+    - width, height: resolution for LoadImagesFromFolderKJ and FindPerfectResolution.
+      Must match the previous segment's output. Pass from get_image_size(prev_first_image).
     """
     if not check_server():
         raise RuntimeError(f"ComfyUI server not reachable at {COMFYUI_URL}")
@@ -272,6 +288,12 @@ def run_extend5(
     workflow[n["anchor_image"]]["inputs"]["image"] = anchor_image
     workflow[n["load_latent"]]["inputs"]["latent"] = prev_latent_basename
     workflow[n["load_images_folder"]]["inputs"]["folder"] = os.path.abspath(prev_images_folder)
+
+    if width is not None and height is not None:
+        workflow[n["resize_anchor"]]["inputs"]["width"] = width
+        workflow[n["resize_anchor"]]["inputs"]["height"] = height
+        workflow[n["load_images_folder"]]["inputs"]["width"] = width
+        workflow[n["load_images_folder"]]["inputs"]["height"] = height
 
     workflow[n["pos_prompt"]]["inputs"]["text"] = prompt
     workflow[n["prompt_string"]]["inputs"]["string_a"] = prompt
@@ -286,8 +308,9 @@ def run_extend5(
     if latent_filename_prefix is not None:
         workflow[n["save_latent"]]["inputs"]["filename_prefix"] = latent_filename_prefix
 
-    print("Extend5 overrides: anchor=%s, prev_folder=%s, prev_latent=%s, seed=%s" % (
-        anchor_image, prev_images_folder, prev_latent_basename, seed))
+    res_str = f" {width}x{height}" if (width is not None and height is not None) else ""
+    print("Extend5 overrides: anchor=%s, prev_folder=%s, prev_latent=%s,%s seed=%s" % (
+        anchor_image, prev_images_folder, prev_latent_basename, res_str, seed))
     result = queue_prompt(workflow)
     prompt_id = result.get("prompt_id")
     if not prompt_id:
