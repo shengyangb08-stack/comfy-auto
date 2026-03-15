@@ -461,7 +461,7 @@ def main() -> None:
 
             try:
                 if seg_idx == 1:
-                    history = run_first5(
+                    history, prompt_used = run_first5(
                         img_basename,
                         prompt=current_prompt,
                         seed=seed,
@@ -477,7 +477,7 @@ def main() -> None:
                             "Extend requires prev_width/prev_height from previous segment. "
                             "Ensure seg 1 completed and saved images."
                         )
-                    history = run_extend5(
+                    history, prompt_used = run_extend5(
                         anchor_basename,
                         prev_images_folder,
                         prev_latent_basename,
@@ -491,6 +491,7 @@ def main() -> None:
                         latent_filename_prefix=f"director_{seg_label}",
                         lightning_combo=args.lightning_combo,
                     )
+                seg_record["prompt"] = prompt_used  # actual prompt sent (with LoRA trigger)
             except RuntimeError as exc:
                 print(f"  Workflow error: {exc}")
                 attempt_record["status"] = "workflow_error"

@@ -117,48 +117,79 @@ def _load_lora_metadata() -> list[dict]:
         return []
 
 
-# TODO: Change how we decide what content LoRA to load (e.g. by prompt keywords, script, or CLI arg).
-def _get_default_content_lora() -> dict | None:
-    """Return the default content LoRA to load. For now, the one and only LoRA in metadata."""
+# TODO: Change how we decide what content LoRAs to load (e.g. by prompt keywords, script, or CLI arg).
+def _get_default_content_loras() -> list[dict]:
+    """Return all content LoRAs from metadata to load."""
     loras = _load_lora_metadata()
-    if not loras:
-        return None
-    # Default: use the first (and currently only) content LoRA.
-    entry = loras[0]
-    file_name = entry.get("file", "")
-    if not file_name:
-        return None
-    # Ensure wan22 prefix for ComfyUI path
-    if not file_name.startswith("wan22"):
-        file_name = f"{LORA_PREFIX}{file_name}"
-    high = entry.get("high_weight")
-    low = entry.get("low_weight")
-    strength = 1.0
-    if isinstance(high, (list, tuple)) and len(high) >= 2:
-        strength = (high[0] + high[1]) / 2
-    elif isinstance(high, (int, float)):
-        strength = float(high)
-    return {"file": file_name, "strength": strength}
+    result: list[dict] = []
+    for entry in loras:
+        file_name = entry.get("file", "")
+        if not file_name:
+            continue
+        if not file_name.startswith("wan22"):
+            file_name = f"{LORA_PREFIX}{file_name}"
+        high = entry.get("high_weight")
+        strength = 1.0
+        if isinstance(high, (list, tuple)) and len(high) >= 2:
+            strength = (high[0] + high[1]) / 2
+        elif isinstance(high, (int, float)):
+            strength = float(high)
+        result.append({"file": file_name, "strength": strength})
+    return result
 
 
-def _apply_content_lora(workflow: dict, lora_entry: dict | None) -> None:
-    """Apply content LoRA to all Power Lora Loader nodes. Same LoRA on lightning high/low + no-lightning."""
-    if not lora_entry:
+def _apply_content_lora(workflow: dict, lora_entries: list[dict]) -> None:
+    """Apply content LoRAs to all Power Lora Loader nodes. Same LoRAs on lightning high/low + no-lightning."""
+    if not lora_entries:
         return
-    lora_widget = {
-        "on": True,
-        "lora": lora_entry["file"],
-        "strength": lora_entry.get("strength", 1.0),
-        "strengthTwo": None,
-    }
     count = 0
     for node_id, node in workflow.items():
         if isinstance(node, dict) and node.get("class_type") == "Power Lora Loader (rgthree)":
             inputs = node.setdefault("inputs", {})
-            inputs["lora_1"] = lora_widget
+            for i, entry in enumerate(lora_entries):
+                inputs[f"lora_{i + 1}"] = {
+                    "on": True,
+                    "lora": entry["file"],
+                    "strength": entry.get("strength", 1.0),
+                    "strengthTwo": None,
+                }
             count += 1
     if count:
-        print("Content LoRA applied to %d Power Lora Loader(s): %s" % (count, lora_entry["file"]))
+        files = [e["file"] for e in lora_entries]
+        print("Content LoRA(s) applied to %d Power Lora Loader(s): %s" % (count, files))
+
+
+# TODO: Remove this default insert - make trigger word insertion conditional or configurable.
+def _prepend_lora_trigger_to_prompt(prompt: str) -> str:
+    """Prepend trigger words of all loaded content LoRAs at the very front of the prompt. By default always applied."""
+    loras = _load_lora_metadata()
+    if not loras:
+        return prompt
+    parts: list[str] = []
+    for entry in loras:
+        trigger = entry.get("trigger_word")
+        if not trigger:
+            continue
+        if isinstance(trigger, list):
+            part = next((str(t).strip() for t in trigger if t), "")
+        else:
+            part = str(trigger).strip()
+        if part:
+            parts.append(part)
+    if parts:
+        prefix = " ".join(parts)
+        print("LoRA trigger prepended (%d chars): %s" % (
+            len(prefix), prefix[:150] + "..." if len(prefix) > 150 else prefix))
+        return prefix + " " + prompt
+    return prompt
+
+
+def _print_modified_prompt(label: str, prompt: str, max_len: int = 400) -> None:
+    """Print the modified prompt for debugging. Truncate if very long."""
+    if len(prompt) <= max_len:
+        print("%s prompt: %s" % (label, prompt))
+    else:
+        print("%s prompt (%d chars): %s..." % (label, len(prompt), prompt[:max_len]))
 
 
 def _apply_lightning_combo(workflow: dict, combo: str) -> None:
@@ -346,8 +377,10 @@ def run_first5(
         workflow = json.load(f)
 
     _apply_lightning_combo(workflow, lightning_combo)
-    _apply_content_lora(workflow, _get_default_content_lora())
+    _apply_content_lora(workflow, _get_default_content_loras())
 
+    prompt = _prepend_lora_trigger_to_prompt(prompt)
+    _print_modified_prompt("First5", prompt)
     n = NODE_FIRST5
     workflow[n["source_image"]]["inputs"]["image"] = source_image
     workflow[n["pos_prompt"]]["inputs"]["text"] = prompt
@@ -367,7 +400,8 @@ def run_first5(
     prompt_id = result.get("prompt_id")
     if not prompt_id:
         raise RuntimeError(f"Failed to queue prompt: {result}")
-    return wait_for_completion(prompt_id)
+    history = wait_for_completion(prompt_id)
+    return (history, prompt)
 
 
 def run_extend5(
@@ -401,8 +435,10 @@ def run_extend5(
         workflow = json.load(f)
 
     _apply_lightning_combo(workflow, lightning_combo)
-    _apply_content_lora(workflow, _get_default_content_lora())
+    _apply_content_lora(workflow, _get_default_content_loras())
 
+    prompt = _prepend_lora_trigger_to_prompt(prompt)
+    _print_modified_prompt("Extend5", prompt)
     n = NODE_EXTEND5
     workflow[n["anchor_image"]]["inputs"]["image"] = anchor_image
     workflow[n["load_latent"]]["inputs"]["latent"] = prev_latent_basename
@@ -434,4 +470,5 @@ def run_extend5(
     prompt_id = result.get("prompt_id")
     if not prompt_id:
         raise RuntimeError(f"Failed to queue prompt: {result}")
-    return wait_for_completion(prompt_id)
+    history = wait_for_completion(prompt_id)
+    return (history, prompt)
