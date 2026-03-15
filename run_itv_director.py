@@ -22,6 +22,47 @@ import urllib.request
 import urllib.error
 
 COMFYUI_URL = "http://127.0.0.1:8188"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ⚡ Lightning LoRA Combos (applied to both first5 and extend5 workflows)
+# ═══════════════════════════════════════════════════════════════════════════════
+# Combo 1: More Motion (⚠️ Rapid Video Degradation)
+#   High: wan22\lightx2v_I2V_14B_480p_cfg_step_distill_rank128_bf16.safetensors, weight 4
+#   Low:  wan22\wan2.2_i2v_A14b_low_noise_lora_rank64_lightx2v_4step_1022.safetensors, weight 1.4
+#
+# Combo 2: Less Degradation (✨ Cleaner Image) — DEFAULT
+#   High: wan22\Wan_2_2_I2V_A14B_HIGH_lightx2v_MoE_distill_lora_rank_64_bf16.safetensors, weight 1
+#   Low:  wan22\wan2.2_i2v_A14b_low_noise_lora_rank64_lightx2v_4step_1022.safetensors, weight 1
+#
+# Combo 3: Balanced (⚖️ Moderate Motion & Degradation)
+#   High: wan22\lightx2v_I2V_14B_480p_cfg_step_distill_rank128_bf16.safetensors, weight 3
+#   Low:  wan22\lightx2v_I2V_14B_480p_cfg_step_distill_rank128_bf16.safetensors, weight 1.5
+#
+# Workflow uses 3ksampler path by default.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+LORA_PREFIX = "wan22\\"
+
+LIGHTNING_COMBOS = {
+    "1": {  # More Motion
+        "high_lora": f"{LORA_PREFIX}lightx2v_I2V_14B_480p_cfg_step_distill_rank128_bf16.safetensors",
+        "high_weight": 4.0,
+        "low_lora": f"{LORA_PREFIX}wan2.2_i2v_A14b_low_noise_lora_rank64_lightx2v_4step_1022.safetensors",
+        "low_weight": 1.4,
+    },
+    "2": {  # Less Degradation (default)
+        "high_lora": f"{LORA_PREFIX}Wan_2_2_I2V_A14B_HIGH_lightx2v_MoE_distill_lora_rank_64_bf16.safetensors",
+        "high_weight": 1.0,
+        "low_lora": f"{LORA_PREFIX}wan2.2_i2v_A14b_low_noise_lora_rank64_lightx2v_4step_1022.safetensors",
+        "low_weight": 1.0,
+    },
+    "3": {  # Balanced
+        "high_lora": f"{LORA_PREFIX}lightx2v_I2V_14B_480p_cfg_step_distill_rank128_bf16.safetensors",
+        "high_weight": 3.0,
+        "low_lora": f"{LORA_PREFIX}lightx2v_I2V_14B_480p_cfg_step_distill_rank128_bf16.safetensors",
+        "low_weight": 1.5,
+    },
+}
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.dirname(_SCRIPT_DIR)
 COMFYUI_OUTPUT_DIR = os.path.join(_PROJECT_ROOT, "ComfyUI", "output")
@@ -29,6 +70,11 @@ COMFYUI_INPUT_DIR = os.path.join(_PROJECT_ROOT, "ComfyUI", "input")
 
 WORKFLOW_FIRST5 = os.path.join(_SCRIPT_DIR, "api_workflow", "ITV_single_first5_API.json")
 WORKFLOW_EXTEND5 = os.path.join(_SCRIPT_DIR, "api_workflow", "ITV_single_extend5_API.json")
+LORA_METADATA = os.path.join(_PROJECT_ROOT, "ComfyUI", "models", "loras", "wan22", "lora_metadata.json")
+
+# Lightning LoRA nodes (same IDs in both workflows)
+NODE_LIGHTNING_HIGH = "368:359"
+NODE_LIGHTNING_LOW = "368:365"
 
 # First5: single source image, no prev_samples
 NODE_FIRST5 = {
@@ -57,6 +103,71 @@ NODE_EXTEND5 = {
     "prompt_string": "759",     # string_a for prompt
     "seed": "788:583",
 }
+
+
+def _load_lora_metadata() -> list[dict]:
+    """Load LoRA metadata from wan22/lora_metadata.json. Returns list of lora entries."""
+    if not os.path.isfile(LORA_METADATA):
+        return []
+    try:
+        with open(LORA_METADATA, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("loras", [])
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+# TODO: Change how we decide what content LoRA to load (e.g. by prompt keywords, script, or CLI arg).
+def _get_default_content_lora() -> dict | None:
+    """Return the default content LoRA to load. For now, the one and only LoRA in metadata."""
+    loras = _load_lora_metadata()
+    if not loras:
+        return None
+    # Default: use the first (and currently only) content LoRA.
+    entry = loras[0]
+    file_name = entry.get("file", "")
+    if not file_name:
+        return None
+    # Ensure wan22 prefix for ComfyUI path
+    if not file_name.startswith("wan22"):
+        file_name = f"{LORA_PREFIX}{file_name}"
+    high = entry.get("high_weight")
+    low = entry.get("low_weight")
+    strength = 1.0
+    if isinstance(high, (list, tuple)) and len(high) >= 2:
+        strength = (high[0] + high[1]) / 2
+    elif isinstance(high, (int, float)):
+        strength = float(high)
+    return {"file": file_name, "strength": strength}
+
+
+def _apply_content_lora(workflow: dict, lora_entry: dict | None) -> None:
+    """Apply content LoRA to all Power Lora Loader nodes. Same LoRA on lightning high/low + no-lightning."""
+    if not lora_entry:
+        return
+    lora_widget = {
+        "on": True,
+        "lora": lora_entry["file"],
+        "strength": lora_entry.get("strength", 1.0),
+        "strengthTwo": None,
+    }
+    count = 0
+    for node_id, node in workflow.items():
+        if isinstance(node, dict) and node.get("class_type") == "Power Lora Loader (rgthree)":
+            inputs = node.setdefault("inputs", {})
+            inputs["lora_1"] = lora_widget
+            count += 1
+    if count:
+        print("Content LoRA applied to %d Power Lora Loader(s): %s" % (count, lora_entry["file"]))
+
+
+def _apply_lightning_combo(workflow: dict, combo: str) -> None:
+    """Apply lightning combo to workflow. combo: '1'|'2'|'3'. Uses 3ksampler path."""
+    cfg = LIGHTNING_COMBOS.get(combo, LIGHTNING_COMBOS["2"])
+    workflow[NODE_LIGHTNING_HIGH]["inputs"]["lora_name"] = cfg["high_lora"]
+    workflow[NODE_LIGHTNING_HIGH]["inputs"]["strength_model"] = cfg["high_weight"]
+    workflow[NODE_LIGHTNING_LOW]["inputs"]["lora_name"] = cfg["low_lora"]
+    workflow[NODE_LIGHTNING_LOW]["inputs"]["strength_model"] = cfg["low_weight"]
 
 
 def check_server() -> bool:
@@ -222,17 +333,20 @@ def run_first5(
     cfg: float | None = None,
     filename_prefix: str | None = None,
     latent_filename_prefix: str | None = None,
+    lightning_combo: str = "2",
 ) -> dict:
     """Run ITV_single_first5 workflow. Source image = anchor for first 5s.
 
-    Returns the history dict. Use extract_saved_latent, extract_saved_images,
-    find_output_video to get output paths.
+    lightning_combo: '1'=more motion, '2'=less degradation (default), '3'=balanced.
     """
     if not check_server():
         raise RuntimeError(f"ComfyUI server not reachable at {COMFYUI_URL}")
 
     with open(WORKFLOW_FIRST5, "r", encoding="utf-8") as f:
         workflow = json.load(f)
+
+    _apply_lightning_combo(workflow, lightning_combo)
+    _apply_content_lora(workflow, _get_default_content_lora())
 
     n = NODE_FIRST5
     workflow[n["source_image"]]["inputs"]["image"] = source_image
@@ -248,7 +362,7 @@ def run_first5(
     if latent_filename_prefix is not None:
         workflow[n["save_latent"]]["inputs"]["filename_prefix"] = latent_filename_prefix
 
-    print("First5 overrides: source_image=%s, seed=%s" % (source_image, seed))
+    print("First5 overrides: source_image=%s, seed=%s, lightning=%s" % (source_image, seed, lightning_combo))
     result = queue_prompt(workflow)
     prompt_id = result.get("prompt_id")
     if not prompt_id:
@@ -269,6 +383,7 @@ def run_extend5(
     cfg: float | None = None,
     filename_prefix: str | None = None,
     latent_filename_prefix: str | None = None,
+    lightning_combo: str = "2",
 ) -> dict:
     """Run ITV_single_extend5 workflow.
 
@@ -277,12 +392,16 @@ def run_extend5(
     - prev_latent_basename: filename of .latent in ComfyUI/input/ (copy there before calling)
     - width, height: resolution for LoadImagesFromFolderKJ and FindPerfectResolution.
       Must match the previous segment's output. Pass from get_image_size(prev_first_image).
+    - lightning_combo: '1'|'2'|'3'.
     """
     if not check_server():
         raise RuntimeError(f"ComfyUI server not reachable at {COMFYUI_URL}")
 
     with open(WORKFLOW_EXTEND5, "r", encoding="utf-8") as f:
         workflow = json.load(f)
+
+    _apply_lightning_combo(workflow, lightning_combo)
+    _apply_content_lora(workflow, _get_default_content_lora())
 
     n = NODE_EXTEND5
     workflow[n["anchor_image"]]["inputs"]["image"] = anchor_image
@@ -309,8 +428,8 @@ def run_extend5(
         workflow[n["save_latent"]]["inputs"]["filename_prefix"] = latent_filename_prefix
 
     res_str = f" {width}x{height}" if (width is not None and height is not None) else ""
-    print("Extend5 overrides: anchor=%s, prev_folder=%s, prev_latent=%s,%s seed=%s" % (
-        anchor_image, prev_images_folder, prev_latent_basename, res_str, seed))
+    print("Extend5 overrides: anchor=%s, prev_folder=%s, prev_latent=%s,%s seed=%s, lightning=%s" % (
+        anchor_image, prev_images_folder, prev_latent_basename, res_str, seed, lightning_combo))
     result = queue_prompt(workflow)
     prompt_id = result.get("prompt_id")
     if not prompt_id:

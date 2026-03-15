@@ -1,10 +1,17 @@
 """
-Director — orchestrate 6 x 5-second segments into a 30-second video.
+Director — orchestrate N x 5-second segments into a video.
 
 Usage:
-    python director.py <input_image> [--prompt TEXT] [--steps N] [--cfg F]
-                                     [--provider gemini|grok]
-                                     [--max-retries 10] [--threshold 0.9]
+  With script (剧本) — full control per segment:
+    python director.py <input_image> <script.json> [--provider gemini|grok] ...
+
+  Without script — auto-generated prompts:
+    python director.py <input_image> [--segments N] [--duration SECONDS]
+                                     [--prompt TEXT] [--steps N] [--cfg F] ...
+
+Script format (script.json):
+  {"segments": [{"segment": 1, "high_level_prompt": "...", "excitement": 4, "stableness": 3}, ...]}
+  excitement/stableness optional (defaults: 5, 3). See script_example.json.
 
 Requires a running ComfyUI server (default http://127.0.0.1:8188).
 """
@@ -30,7 +37,6 @@ _COMFYUI_INPUT = os.path.join(_PROJECT_ROOT, "ComfyUI", "input")
 _COMFYUI_OUTPUT = os.path.join(_PROJECT_ROOT, "ComfyUI", "output")
 _OUTPUT_ROOT = os.path.join(_SCRIPT_DIR, "output")
 
-NUM_SEGMENTS = 6
 SEGMENT_DURATION = 5
 
 # ── Relaxed content-check prompt (NSFW-tolerant) ─────────────────────
@@ -70,23 +76,39 @@ If no structural deformations are found, return \
 
 # ── Pacing (excitement + stableness per segment) ───────────────────────
 
-def _get_pacing(seg_idx: int) -> tuple[int, int]:
+def _get_pacing(seg_idx: int, num_segments: int) -> tuple[int, int]:
     """Return (excitement 0-10, stableness 1-5) for orchestrated flow.
 
-    Arc: intro (calm) -> establish -> build -> peak -> sustain -> wind down.
-    Avoids making the whole movie too plain or too crazy.
+    - Arc: intro (calm) -> establish -> build -> peak -> sustain -> wind down.
+    - Longer videos: more stable/plain overall (lower excitement, higher stableness).
+    - Adds random excitement variation for variety.
     """
-    # seg 1: intro, seg 2: calm, seg 3: build, seg 4: peak, seg 5: sustain, seg 6: wind down
     pacing = [
-        (4, 3),   # 1: intro — moderate calm
-        (3, 2),   # 2: establish — calm, minimal movement
-        (5, 4),   # 3: build — more energy
-        (7, 5),   # 4: peak — high energy, full movement
-        (5, 4),   # 5: sustain — moderate
-        (3, 3),   # 6: wind down — calm
+        (4, 3),   # intro — moderate calm
+        (3, 2),   # establish — calm, minimal movement
+        (5, 4),   # build — more energy
+        (7, 5),   # peak — high energy, full movement
+        (5, 4),   # sustain — moderate
+        (3, 3),   # wind down — calm
     ]
-    idx = min(seg_idx - 1, len(pacing) - 1)
-    return pacing[idx]
+    if num_segments <= len(pacing):
+        idx = min(seg_idx - 1, len(pacing) - 1)
+    else:
+        idx = (seg_idx - 1) % len(pacing)
+    base_excitement, base_stableness = pacing[idx]
+
+    # Longer videos: dampen excitement, boost stableness (more stable/plain)
+    # 6 seg = 1.0, 30 seg ≈ 0.7, 120 seg ≈ 0.4
+    length_factor = max(0.35, 1.0 - (num_segments - 6) * 0.006)
+    excitement = int(base_excitement * length_factor)
+    stableness = min(5, int(base_stableness + (1 - length_factor) * 2.5))
+
+    # Random excitement: ±1 for variety, more when longer (keeps it from feeling flat)
+    excitement += random.randint(-1, 1)
+    excitement = max(1, min(10, excitement))
+    stableness = max(1, min(5, stableness + random.randint(-1, 0)))  # slight random down only
+
+    return (excitement, stableness)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
@@ -227,9 +249,15 @@ def _load_api_keys() -> dict:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="director",
-        description="Generate a 30-second video from 6 x 5-second segments.",
+        description="Generate a video from N x 5-second segments.",
     )
     p.add_argument("image", help="Path to the input image.")
+    p.add_argument("script", nargs="?", default=None,
+                   help="Path to script JSON (剧本). If provided, segments/prompts come from script.")
+    p.add_argument("--segments", type=int, default=6,
+                   help="Number of 5-second segments when not using script (default: 6 = 30s).")
+    p.add_argument("--duration", type=int, default=None,
+                   help="Total duration in seconds when not using script; overrides --segments.")
     p.add_argument("--prompt", type=str, default=None,
                    help="Initial positive prompt for segment 1.")
     p.add_argument("--steps", type=int, default=None,
@@ -244,6 +272,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Content-check score threshold (default: 0.9).")
     p.add_argument("--skip-check", action="store_true",
                    help="Skip content checking entirely (faster, no QA).")
+    p.add_argument("--lightning-combo", choices=["1", "2", "3"], default="2",
+                   help="Lightning LoRA: 1=more motion, 2=less degradation (default), 3=balanced.")
     return p
 
 
@@ -258,6 +288,29 @@ def main() -> None:
     if not os.path.isfile(args.image):
         print(f"ERROR: Image not found: {args.image}", file=sys.stderr)
         sys.exit(1)
+
+    script_entries: list[dict] | None = None
+    if args.script:
+        if not os.path.isfile(args.script):
+            print(f"ERROR: Script not found: {args.script}", file=sys.stderr)
+            sys.exit(1)
+        with open(args.script, encoding="utf-8") as f:
+            script_data = json.load(f)
+        script_entries = script_data.get("segments", [])
+        if not script_entries:
+            print("ERROR: Script has no 'segments' array.", file=sys.stderr)
+            sys.exit(1)
+        num_segments = len(script_entries)
+        print(f"  Loaded script: {num_segments} segments")
+    else:
+        # Resolve segment count: --duration overrides --segments
+        if args.duration is not None:
+            num_segments = max(1, args.duration // SEGMENT_DURATION)
+            if args.duration % SEGMENT_DURATION:
+                print(f"  Note: {args.duration}s rounds to {num_segments} x {SEGMENT_DURATION}s = "
+                      f"{num_segments * SEGMENT_DURATION}s")
+        else:
+            num_segments = max(1, args.segments)
 
     from run_itv_director import (
         run_first5,
@@ -280,20 +333,25 @@ def main() -> None:
         checker = _build_checker(api_keys)
 
     session_dir = _make_session_dir()
+    total_seconds = num_segments * SEGMENT_DURATION
     print(f"\nSession directory: {session_dir}")
-    print(f"Segments: {NUM_SEGMENTS} x {SEGMENT_DURATION}s = "
-          f"{NUM_SEGMENTS * SEGMENT_DURATION}s total\n")
+    print(f"Segments: {num_segments} x {SEGMENT_DURATION}s = {total_seconds}s total\n")
 
     manifest: dict = {
         "input_image": os.path.abspath(args.image),
         "started_at": datetime.datetime.now().isoformat(),
         "settings": {
+            "segments": num_segments,
+            "segment_duration": SEGMENT_DURATION,
+            "total_seconds": total_seconds,
+            "script": args.script,
             "steps": args.steps,
             "cfg": args.cfg,
             "provider": args.provider,
             "threshold": args.threshold,
             "max_retries": args.max_retries,
             "skip_check": args.skip_check,
+            "lightning_combo": args.lightning_combo,
         },
         "segments": [],
         "final_video": None,
@@ -306,22 +364,58 @@ def main() -> None:
     print(f"  Anchor image (for run): {anchor_basename}")
 
     current_image_path = anchor_image_path  # for seg 1; seg 2+ = last saved image (for autoprompt)
-    current_prompt = args.prompt
+    current_prompt = args.prompt  # used only for seg 1 when no script; else from script
     prev_images_folder: str | None = None  # session_dir/seg_XX/ for extend (LoadImagesFromFolderKJ)
     prev_latent_basename: str | None = None  # filename in ComfyUI/input/ for extend
     prev_width: int | None = None  # resolution from previous segment (for extend)
     prev_height: int | None = None
 
-    for seg_idx in range(1, NUM_SEGMENTS + 1):
-        seg_label = f"seg_{seg_idx:02d}"
+    seg_pad = len(str(num_segments))
+    for seg_idx in range(1, num_segments + 1):
+        seg_label = f"seg_{seg_idx:0{seg_pad}d}"
         seg_images_dir = os.path.join(session_dir, seg_label)  # where we store this segment's images
         print("=" * 70)
-        print(f"  SEGMENT {seg_idx}/{NUM_SEGMENTS}")
+        print(f"  SEGMENT {seg_idx}/{num_segments}")
         print("=" * 70)
 
-        # For segments 2+, generate prompt from the last frame with pacing
-        excitement, stableness = _get_pacing(seg_idx) if seg_idx > 1 else (None, None)
-        if seg_idx > 1:
+        # Resolve prompt for this segment
+        excitement, stableness = None, None
+        if script_entries:
+            entry = script_entries[seg_idx - 1]
+            high_level = entry.get("high_level_prompt", "").strip()
+            if not high_level:
+                print(f"  ERROR: Segment {seg_idx} has no high_level_prompt in script.")
+                break
+            excitement = entry.get("excitement", 5)
+            stableness = entry.get("stableness", 3)
+            print(f"  Script: \"{high_level}\" (ex={excitement}, st={stableness})")
+            print(f"  Generating autoprompt (excitement={excitement}, stableness={stableness})...")
+            llm_prompt = generate_prompt(
+                current_image_path,
+                duration=SEGMENT_DURATION,
+                provider=args.provider,
+                excitement=excitement,
+                stableness=stableness,
+            )
+            current_prompt = high_level + "\n" + llm_prompt
+            print(f"  Prompt (high_level + LLM):\n{current_prompt}")
+        elif seg_idx == 1:
+            if not current_prompt:
+                print(f"  Generating autoprompt for segment 1 (no --prompt, no script)...")
+                excitement, stableness = _get_pacing(1, num_segments)
+                current_prompt = generate_prompt(
+                    current_image_path,
+                    duration=SEGMENT_DURATION,
+                    provider=args.provider,
+                    excitement=excitement,
+                    stableness=stableness,
+                )
+                print(f"  Autoprompt:\n{current_prompt}")
+            else:
+                print(f"  Using --prompt for segment 1")
+                print(f"  Prompt:\n{current_prompt}")
+        else:
+            excitement, stableness = _get_pacing(seg_idx, num_segments)
             print(f"  Generating autoprompt (excitement={excitement}, stableness={stableness})...")
             current_prompt = generate_prompt(
                 current_image_path,
@@ -330,8 +424,7 @@ def main() -> None:
                 excitement=excitement,
                 stableness=stableness,
             )
-            prompt_preview = current_prompt[:120].replace("\n", " ")
-            print(f"  Autoprompt: {prompt_preview}...")
+            print(f"  Autoprompt:\n{current_prompt}")
 
         # Seg 1: first5 uses source image. Seg 2+: extend5 uses prev_images_folder + prev_latent + anchor
         if seg_idx == 1:
@@ -351,6 +444,8 @@ def main() -> None:
             "video_file": None,
             "content_check": None,
         }
+        if script_entries and seg_idx <= len(script_entries):
+            seg_record["high_level_prompt"] = script_entries[seg_idx - 1].get("high_level_prompt", "")
 
         succeeded = False
         for attempt in range(1, args.max_retries + 1):
@@ -374,6 +469,7 @@ def main() -> None:
                         cfg=args.cfg,
                         filename_prefix=f"director_{seg_label}",
                         latent_filename_prefix=f"director_{seg_label}",
+                        lightning_combo=args.lightning_combo,
                     )
                 else:
                     if prev_width is None or prev_height is None:
@@ -393,6 +489,7 @@ def main() -> None:
                         cfg=args.cfg,
                         filename_prefix=f"director_{seg_label}",
                         latent_filename_prefix=f"director_{seg_label}",
+                        lightning_combo=args.lightning_combo,
                     )
             except RuntimeError as exc:
                 print(f"  Workflow error: {exc}")
@@ -448,7 +545,7 @@ def main() -> None:
             # Copy saved images to session_dir/seg_XX/ for next segment's extend
             saved_images = _find_output_saved_images(history)
             next_seg = seg_idx + 1
-            if saved_images and next_seg <= NUM_SEGMENTS:
+            if saved_images and next_seg <= num_segments:
                 os.makedirs(seg_images_dir, exist_ok=True)
                 for i, src in enumerate(saved_images):
                     if os.path.isfile(src):
@@ -464,7 +561,7 @@ def main() -> None:
                     print(f"  Saved {len(saved_images)} images to {seg_label}/ for seg {next_seg} (res {prev_width}x{prev_height})")
                 else:
                     print(f"  Saved {len(saved_images)} images to {seg_label}/ for seg {next_seg}")
-            elif next_seg <= NUM_SEGMENTS:
+            elif next_seg <= num_segments:
                 # Fallback: extract last frame from video
                 last_frame = extract_last_frame(video_src)
                 fallback_img = os.path.join(seg_images_dir, "frame_00000.png")
@@ -482,8 +579,8 @@ def main() -> None:
             if latent_src and os.path.isfile(latent_src):
                 session_latent = os.path.join(session_dir, f"{seg_label}.latent")
                 shutil.copy2(latent_src, session_latent)
-                if next_seg <= NUM_SEGMENTS:
-                    prev_latent_basename = f"director_seg_{next_seg:02d}_prev.latent"
+                if next_seg <= num_segments:
+                    prev_latent_basename = f"director_seg_{next_seg:0{seg_pad}d}_prev.latent"
                     prev_latent_dest = os.path.join(_COMFYUI_INPUT, prev_latent_basename)
                     shutil.copy2(latent_src, prev_latent_dest)
                     print(f"  Saved latent for seg {next_seg}: {prev_latent_basename}")
@@ -500,20 +597,20 @@ def main() -> None:
         print(f"\n  Segment {seg_idx} complete.\n")
 
     # ── Final video ───────────────────────────────────────────────────
-    # Extend workflow combines video internally; seg_06 output = full 30s
+    # Extend workflow combines video internally; last segment = full video
 
     completed = sum(1 for s in manifest["segments"] if s.get("video_file"))
-    if completed == NUM_SEGMENTS:
-        final_seg_video = os.path.join(session_dir, "seg_06.mp4")
-        final_path = os.path.join(session_dir, "final_30s.mp4")
-        if os.path.isfile(final_seg_video):
-            shutil.copy2(final_seg_video, final_path)
-            manifest["final_video"] = "final_30s.mp4"
-            print(f"\n  Final video: {final_path}")
-        else:
-            manifest["final_video"] = None
+    last_seg_label = f"seg_{num_segments:0{seg_pad}d}"
+    final_seg_video = os.path.join(session_dir, f"{last_seg_label}.mp4")
+    final_video_name = f"final_{total_seconds}s.mp4"
+    final_path = os.path.join(session_dir, final_video_name)
+    if completed == num_segments and os.path.isfile(final_seg_video):
+        shutil.copy2(final_seg_video, final_path)
+        manifest["final_video"] = final_video_name
+        print(f"\n  Final video: {final_path}")
     else:
-        print(f"\n  Only {completed}/{NUM_SEGMENTS} segments completed.")
+        if completed < num_segments:
+            print(f"\n  Only {completed}/{num_segments} segments completed.")
         manifest["final_video"] = None
 
     # ── Write manifest ────────────────────────────────────────────────

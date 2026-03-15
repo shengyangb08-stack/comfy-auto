@@ -1,0 +1,42 @@
+{
+  "name": "Example script / 剧本示例",
+  "description": "Each segment has a high_level_prompt. The LLM expands it into the detailed second-by-second format.",
+  "segments": [
+    {
+      "segment": 1,
+      "high_level_prompt": "Woman standing in a park, calm morning, gentle breeze in her hair",
+      "excitement": 4,
+      "stableness": 3
+    },
+    {
+      "segment": 2,
+      "high_level_prompt": "She starts walking slowly toward the path",
+      "excitement": 3,
+      "stableness": 4
+    },
+    {
+      "segment": 3,
+      "high_level_prompt": "She pauses to look at flowers by the path",
+      "excitement": 2,
+      "stableness": 4
+    },
+    {
+      "segment": 4,
+      "high_level_prompt": "She continues walking, skirt swaying slightly",
+      "excitement": 4,
+      "stableness": 3
+    },
+    {
+      "segment": 5,
+      "high_level_prompt": "She turns her head to look at something off-camera",
+      "excitement": 3,
+      "stableness": 4
+    },
+    {
+      "segment": 6,
+      "high_level_prompt": "She smiles and walks out of frame slowly",
+      "excitement": 3,
+      "stableness": 4
+    }
+  ]
+}

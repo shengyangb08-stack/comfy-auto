@@ -38,6 +38,7 @@ _EXCITEMENT_GUIDANCE = {
     8: "High energy, dynamic, vivid, noticeable movement.",
     9: "Very high energy, dramatic, intense, vivid movement.",
     10: "Very high energy, dramatic, intense, vivid movement.",
+    100: "Climax,squirtig, intense, violent movement.",
 }
 
 
@@ -95,6 +96,30 @@ Here are two examples:
 """
 
 
+_SCRIPT_SYSTEM_PROMPT = """\
+You are a professional AI video prompt engineer. You specialize in expanding \
+high-level scene descriptions into second-by-second video prompts for image-to-video \
+models (Wan2.2 / Kling / Runway).
+
+Your job: given a still image and a HIGH-LEVEL PROMPT from the user, expand it into \
+a {duration}-second video description. The high-level prompt is the user's creative \
+direction — you must faithfully realize it while filling in the detailed second-by-second \
+progression. Stay true to the user's intent.
+
+CONTROL PARAMETERS (follow these strictly):
+- Excitement level: {excitement_guidance}
+- Stableness / movement scope: {stableness_instruction}
+
+CAMERA — CRITICAL: Keep the camera completely stable. Never change the angle, zoom, \
+pan, or move the camera. Only subjects and environment may move.
+
+FORMAT — you MUST follow this exact structure:
+- One line per second, 0 to {duration}.
+- Each line MUST begin with "(At N second:" or "(At N seconds:" and end with ")".
+- Output ONLY the timestamped lines — no preamble, no explanation, no markdown.
+"""
+
+
 def load_api_keys() -> dict[str, str]:
     if os.path.isfile(_KEYS_FILE):
         with open(_KEYS_FILE, encoding="utf-8") as f:
@@ -116,6 +141,14 @@ def image_to_base64(path: str) -> tuple[str, str]:
 
 def _build_system_prompt(duration: int, excitement: int, stableness: int) -> str:
     return _SYSTEM_PROMPT.format(
+        duration=duration,
+        excitement_guidance=_get_excitement_guidance(excitement),
+        stableness_instruction=_get_stableness_instruction(stableness),
+    )
+
+
+def _build_script_system_prompt(duration: int, excitement: int, stableness: int) -> str:
+    return _SCRIPT_SYSTEM_PROMPT.format(
         duration=duration,
         excitement_guidance=_get_excitement_guidance(excitement),
         stableness_instruction=_get_stableness_instruction(stableness),
@@ -199,6 +232,65 @@ def generate_prompt(
             print("ERROR: Gemini API key not found.", file=sys.stderr)
             sys.exit(1)
         return generate_prompt_gemini(image_path, duration, key, excitement, stableness)
+
+
+def generate_prompt_from_script(
+    image_path: str,
+    high_level_prompt: str,
+    duration: int = 5,
+    provider: str = "gemini",
+    excitement: int = 5,
+    stableness: int = 3,
+) -> str:
+    """Expand a high-level prompt into the full second-by-second format using the LLM.
+
+    The high_level_prompt is the user's creative direction; the LLM fills in
+    the detailed timestamped progression while staying true to the intent.
+    """
+    keys = load_api_keys()
+    system = _build_script_system_prompt(duration, excitement, stableness)
+    user_text = (
+        f"Expand this high-level prompt into a {duration}-second video description. "
+        f"Use the image for visual context.\n\n"
+        f"HIGH-LEVEL PROMPT: {high_level_prompt}"
+    )
+
+    if provider == "grok":
+        key = keys.get("grok") or os.environ.get("GROK_API_KEY", "")
+        if not key:
+            raise RuntimeError("Grok API key not found.")
+        from openai import OpenAI
+        client = OpenAI(api_key=key, base_url="https://api.x.ai/v1")
+        b64, mime = image_to_base64(image_path)
+        response = client.chat.completions.create(
+            model="grok-4-fast-non-reasoning",
+            messages=[
+                {"role": "system", "content": system},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_text},
+                        {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
+                    ],
+                },
+            ],
+            max_tokens=1024,
+            temperature=0.7,
+        )
+        return response.choices[0].message.content.strip()
+    else:
+        key = keys.get("gemini") or os.environ.get("GEMINI_API_KEY", "")
+        if not key:
+            raise RuntimeError("Gemini API key not found.")
+        from google import genai
+        from PIL import Image
+        client = genai.Client(api_key=key)
+        image = Image.open(image_path)
+        response = client.models.generate_content(
+            model="gemini-3-flash-preview",
+            contents=[system, user_text, image],
+        )
+        return response.text.strip()
 
 
 def main():
