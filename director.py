@@ -6,12 +6,13 @@ Usage:
     python director.py <input_image> <script.json> [--provider gemini|grok] ...
 
   Without script — auto-generated prompts:
-    python director.py <input_image> [--segments N] [--duration SECONDS]
+    python director.py <input_image> [--segments N] [--duration SECONDS]  (default: 2 segments = 10s)
                                      [--prompt TEXT] [--steps N] [--cfg F] ...
 
 Script format (script.json):
   {"segments": [{"segment": 1, "high_level_prompt": "...", "excitement": 4, "stableness": 3}, ...]}
-  excitement/stableness optional (defaults: 5, 3). See script_example.json.
+  excitement/stableness optional (defaults: 5, 3). See script/script_example.json, script/script_two_segment_climax.json,
+  script/script_five_segment_arc.json, SCRIPT_README.md.
 
 Requires a running ComfyUI server (default http://127.0.0.1:8188).
 """
@@ -31,11 +32,13 @@ import time
 import cv2
 import numpy as np
 
+from project_paths import get_director_sessions_root
+
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.dirname(_SCRIPT_DIR)
 _COMFYUI_INPUT = os.path.join(_PROJECT_ROOT, "ComfyUI", "input")
 _COMFYUI_OUTPUT = os.path.join(_PROJECT_ROOT, "ComfyUI", "output")
-_OUTPUT_ROOT = os.path.join(_SCRIPT_DIR, "output")
+_OUTPUT_ROOT = get_director_sessions_root()
 
 SEGMENT_DURATION = 5
 
@@ -74,41 +77,107 @@ If no structural deformations are found, return \
 """
 
 
-# ── Pacing (excitement + stableness per segment) ───────────────────────
+# ── Pacing (excitement + stableness) + narrative arc for autoprompt ──
 
 def _get_pacing(seg_idx: int, num_segments: int) -> tuple[int, int]:
-    """Return (excitement 0-10, stableness 1-5) for orchestrated flow.
+    """Return (excitement 0-10, stableness 1-5) for motion → climax arc.
 
-    - Arc: intro (calm) -> establish -> build -> peak -> sustain -> wind down.
-    - Longer videos: more stable/plain overall (lower excitement, higher stableness).
-    - Adds random excitement variation for variety.
+    Default intent (no script):
+    - 2 segments: segment 1 = more motion; segment 2 = climax (squirt, face, release).
+    - 1 segment: combined motion + climax in one 5s block.
+    - 5 segments: stable → motion → more motion → climax (seg 4) → stable (seg 5).
+    - 3–4 segments: segment 1 motion, segment 2 designated climax; later = aftermath/cool-down.
     """
-    pacing = [
-        (4, 3),   # intro — moderate calm
-        (3, 2),   # establish — calm, minimal movement
-        (5, 4),   # build — more energy
-        (7, 5),   # peak — high energy, full movement
-        (5, 4),   # sustain — moderate
-        (3, 3),   # wind down — calm
-    ]
-    if num_segments <= len(pacing):
-        idx = min(seg_idx - 1, len(pacing) - 1)
-    else:
-        idx = (seg_idx - 1) % len(pacing)
-    base_excitement, base_stableness = pacing[idx]
+    if num_segments == 1:
+        return (8, 4)
+    if num_segments == 2:
+        if seg_idx == 1:
+            return (8, 2)   # more motion, wider second-by-second detail
+        return (9, 4)     # climax — strong + enough stableness for full lines
 
-    # Longer videos: dampen excitement, boost stableness (more stable/plain)
-    # 6 seg = 1.0, 30 seg ≈ 0.7, 120 seg ≈ 0.4
-    length_factor = max(0.35, 1.0 - (num_segments - 6) * 0.006)
-    excitement = int(base_excitement * length_factor)
-    stableness = min(5, int(base_stableness + (1 - length_factor) * 2.5))
+    # Five segments: stable → motion → more motion → climax → stable
+    if num_segments == 5:
+        pacing5 = {
+            1: (4, 4),   # stable
+            2: (6, 3),   # motion
+            3: (8, 2),   # more motion
+            4: (9, 4),   # climax
+            5: (4, 4),   # back to stable
+        }
+        return pacing5[seg_idx]
 
-    # Random excitement: ±1 for variety, more when longer (keeps it from feeling flat)
-    excitement += random.randint(-1, 1)
-    excitement = max(1, min(10, excitement))
-    stableness = max(1, min(5, stableness + random.randint(-1, 0)))  # slight random down only
+    # 3–4 segments (legacy): motion → climax on seg 2 → taper
+    if seg_idx == 1:
+        return (8, 2)
+    if seg_idx == 2:
+        return (9, 4)
+    return (5, 4)
 
-    return (excitement, stableness)
+
+def _segment_arc_instruction(seg_idx: int, num_segments: int) -> str:
+    """Extra LLM instructions: timeline density + explicit climax when required."""
+    if num_segments == 1:
+        return (
+            "NARRATIVE ARC (single 5s clip): Build energy then reach a clear CLIMAX in this segment. "
+            "Explicitly describe orgasm, squirt if applicable, and facial expression (eyes, mouth, tension release) "
+            "as the peak approaches. Within the 5 seconds, at least 3 seconds must be fully detailed timestamp lines."
+        )
+    if num_segments == 2:
+        if seg_idx == 1:
+            return (
+                "NARRATIVE ARC (segment 1 of 2 — MOTION): Prioritize MORE movement and body dynamics. "
+                "Do NOT climax here — reserve orgasm/squirt and peak facial expression for segment 2. "
+                "Across this 5s block, at least 3 seconds (e.g. 0–2 or 0–3) must be full detailed timestamp lines; "
+                "use any remaining lines to transition toward rising tension."
+            )
+        return (
+            "NARRATIVE ARC (segment 2 of 2 — CLIMAX): The character MUST reach CLIMAX in this block. "
+            "Explicitly describe: orgasm, squirt if applicable, and facial expression (eyes closing, mouth opening, "
+            "release, afterglow). Peak intensity should land around seconds 2–4 when possible. "
+            "At least 3 seconds must still be fully detailed timestamp lines."
+        )
+
+    # Five segments: stable → motion → more motion → climax → stable
+    if num_segments == 5:
+        arc5 = {
+            1: (
+                "NARRATIVE ARC (segment 1 of 5 — STABLE): Calm, minimal movement; subtle breathing, small shifts only. "
+                "No climax. At least 3 seconds fully detailed timestamp lines."
+            ),
+            2: (
+                "NARRATIVE ARC (segment 2 of 5 — MOTION): Clear increase in movement and energy vs segment 1. "
+                "Still no climax. At least 3 detailed seconds."
+            ),
+            3: (
+                "NARRATIVE ARC (segment 3 of 5 — MORE MOTION): Strongest movement before the peak; build tension. "
+                "Do not climax yet. At least 3 detailed seconds."
+            ),
+            4: (
+                "NARRATIVE ARC (segment 4 of 5 — CLIMAX): The character MUST reach CLIMAX here. "
+                "Explicit orgasm, squirt if applicable, facial expression (eyes, mouth, release). "
+                "Peak ~seconds 2–4. At least 3 detailed seconds."
+            ),
+            5: (
+                "NARRATIVE ARC (segment 5 of 5 — STABLE AGAIN): Afterglow, calm, slower movement; return to stability. "
+                "No new climax. At least 3 detailed seconds."
+            ),
+        }
+        return arc5[seg_idx]
+
+    # 3–4 segments: climax on segment 2, then aftermath
+    if seg_idx == 1:
+        return (
+            "NARRATIVE ARC (segment 1): More motion; at least 3 detailed seconds; do not climax yet."
+        )
+    if seg_idx == 2:
+        return (
+            "NARRATIVE ARC (segment 2 — CLIMAX): Designated climax segment. At least one full run must reach climax "
+            "across the video — this is it. Explicit orgasm, squirt if applicable, facial expression; peak ~seconds 2–4."
+        )
+    return (
+        "NARRATIVE ARC (later segment): Aftermath, cool-down, or continuation after climax; "
+        "keep timestamp format; at least 3 seconds detailed if possible."
+    )
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
@@ -254,8 +323,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("image", help="Path to the input image.")
     p.add_argument("script", nargs="?", default=None,
                    help="Path to script JSON (剧本). If provided, segments/prompts come from script.")
-    p.add_argument("--segments", type=int, default=6,
-                   help="Number of 5-second segments when not using script (default: 6 = 30s).")
+    p.add_argument("--segments", type=int, default=2,
+                   help="Number of 5-second segments when not using script (default: 2 = 10s).")
     p.add_argument("--duration", type=int, default=None,
                    help="Total duration in seconds when not using script; overrides --segments.")
     p.add_argument("--prompt", type=str, default=None,
@@ -390,12 +459,14 @@ def main() -> None:
             stableness = entry.get("stableness", 3)
             print(f"  Script: \"{high_level}\" (ex={excitement}, st={stableness})")
             print(f"  Generating autoprompt (excitement={excitement}, stableness={stableness})...")
+            arc = _segment_arc_instruction(seg_idx, num_segments)
             llm_prompt = generate_prompt(
                 current_image_path,
                 duration=SEGMENT_DURATION,
                 provider=args.provider,
                 excitement=excitement,
                 stableness=stableness,
+                segment_arc=arc,
             )
             current_prompt = high_level + "\n" + llm_prompt
             print(f"  Prompt (high_level + LLM):\n{current_prompt}")
@@ -403,12 +474,14 @@ def main() -> None:
             if not current_prompt:
                 print(f"  Generating autoprompt for segment 1 (no --prompt, no script)...")
                 excitement, stableness = _get_pacing(1, num_segments)
+                arc = _segment_arc_instruction(1, num_segments)
                 current_prompt = generate_prompt(
                     current_image_path,
                     duration=SEGMENT_DURATION,
                     provider=args.provider,
                     excitement=excitement,
                     stableness=stableness,
+                    segment_arc=arc,
                 )
                 print(f"  Autoprompt:\n{current_prompt}")
             else:
@@ -416,6 +489,7 @@ def main() -> None:
                 print(f"  Prompt:\n{current_prompt}")
         else:
             excitement, stableness = _get_pacing(seg_idx, num_segments)
+            arc = _segment_arc_instruction(seg_idx, num_segments)
             print(f"  Generating autoprompt (excitement={excitement}, stableness={stableness})...")
             current_prompt = generate_prompt(
                 current_image_path,
@@ -423,6 +497,7 @@ def main() -> None:
                 provider=args.provider,
                 excitement=excitement,
                 stableness=stableness,
+                segment_arc=arc,
             )
             print(f"  Autoprompt:\n{current_prompt}")
 
@@ -575,6 +650,20 @@ def main() -> None:
                     prev_width, prev_height = sz
                 print(f"  Saved fallback frame for seg {next_seg} from video")
 
+            # Full-timeline frames for post_edit: last segment's Save batch = full extended video frames
+            if seg_idx == num_segments and saved_images:
+                seg_all_dir = os.path.join(session_dir, "seg_all")
+                os.makedirs(seg_all_dir, exist_ok=True)
+                for i, src in enumerate(saved_images):
+                    if os.path.isfile(src):
+                        ext = os.path.splitext(src)[1]
+                        dest = os.path.join(seg_all_dir, f"frame_{i:05d}{ext}")
+                        shutil.copy2(src, dest)
+                print(
+                    f"  Saved {len(saved_images)} frames to seg_all/ for post-processing "
+                    f"(full timeline; post_editor uses this by default)."
+                )
+
             # Copy latent to session dir and ComfyUI/input for next segment
             latent_src = _find_output_latent(history)
             if latent_src and os.path.isfile(latent_src):
@@ -617,6 +706,13 @@ def main() -> None:
     # ── Write manifest ────────────────────────────────────────────────
 
     manifest["finished_at"] = datetime.datetime.now().isoformat()
+    seg_all_dir = os.path.join(session_dir, "seg_all")
+    if os.path.isdir(seg_all_dir):
+        for name in os.listdir(seg_all_dir):
+            if name.lower().endswith((".png", ".jpg", ".jpeg", ".webp", ".bmp")):
+                manifest["post_edit_frames"] = "seg_all"
+                break
+
     manifest_path = os.path.join(session_dir, "manifest.json")
     with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)

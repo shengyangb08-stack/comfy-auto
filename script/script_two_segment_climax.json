@@ -1,0 +1,18 @@
+{
+  "name": "Two segments — motion then climax",
+  "description": "Segment 1: build motion. Segment 2: climax (reinforce in high_level_prompt).",
+  "segments": [
+    {
+      "segment": 1,
+      "high_level_prompt": "Build tension and movement; hands, hips, breathing; no orgasm yet.",
+      "excitement": 8,
+      "stableness": 2
+    },
+    {
+      "segment": 2,
+      "high_level_prompt": "She reaches orgasm: visible release, squirt if appropriate, eyes and mouth showing climax.",
+      "excitement": 9,
+      "stableness": 4
+    }
+  ]
+}

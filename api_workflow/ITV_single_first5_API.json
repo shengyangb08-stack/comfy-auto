@@ -355,7 +355,7 @@
   },
   "368:355": {
     "inputs": {
-      "clip_name": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "clip_name": "nsfw_wan_umt5-xxl_fp8_scaled.safetensors",
       "type": "wan",
       "device": "default"
     },
@@ -366,7 +366,7 @@
   },
   "368:353": {
     "inputs": {
-      "vae_name": "wan_2.1_vae.safetensors"
+      "vae_name": "Wan2_1_VAE_fp32.safetensors"
     },
     "class_type": "VAELoader",
     "_meta": {

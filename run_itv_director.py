@@ -43,6 +43,11 @@ COMFYUI_URL = "http://127.0.0.1:8188"
 
 LORA_PREFIX = "wan22\\"
 
+# TODO: Re-enable when we load content LoRAs selectively (not every entry in lora_metadata.json).
+LOAD_CONTENT_LORAS_FROM_METADATA = False
+# TODO: Re-enable when prompts should be prefixed with LoRA trigger words again.
+PREPEND_LORA_TRIGGERS_TO_PROMPT = False
+
 LIGHTNING_COMBOS = {
     "1": {  # More Motion
         "high_lora": f"{LORA_PREFIX}lightx2v_I2V_14B_480p_cfg_step_distill_rank128_bf16.safetensors",
@@ -119,7 +124,9 @@ def _load_lora_metadata() -> list[dict]:
 
 # TODO: Change how we decide what content LoRAs to load (e.g. by prompt keywords, script, or CLI arg).
 def _get_default_content_loras() -> list[dict]:
-    """Return all content LoRAs from metadata to load."""
+    """Return content LoRAs from metadata to load into Power Lora Loader (when enabled)."""
+    if not LOAD_CONTENT_LORAS_FROM_METADATA:
+        return []
     loras = _load_lora_metadata()
     result: list[dict] = []
     for entry in loras:
@@ -162,6 +169,8 @@ def _apply_content_lora(workflow: dict, lora_entries: list[dict]) -> None:
 # TODO: Remove this default insert - make trigger word insertion conditional or configurable.
 def _prepend_lora_trigger_to_prompt(prompt: str) -> str:
     """Prepend trigger words of all loaded content LoRAs at the very front of the prompt. By default always applied."""
+    if not PREPEND_LORA_TRIGGERS_TO_PROMPT:
+        return prompt
     loras = _load_lora_metadata()
     if not loras:
         return prompt

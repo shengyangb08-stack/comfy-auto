@@ -1,0 +1,39 @@
+{
+  "1": {
+    "inputs": {
+      "frame_rate": 32,
+      "loop_count": 0,
+      "filename_prefix": "zzzz_last-60FPS-wan22_22_00-06-14",
+      "format": "video/h264-mp4",
+      "pix_fmt": "yuv420p",
+      "crf": 18,
+      "save_metadata": true,
+      "trim_to_audio": false,
+      "pingpong": false,
+      "save_output": true,
+      "images": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "VHS_VideoCombine",
+    "_meta": {
+      "title": "Video Combine 🎥🅥🅗🅢"
+    }
+  },
+  "2": {
+    "inputs": {
+      "folder": "C:\\Users\\sheng\\Documents\\ComfyUI-aki-v3\\comfy_auto\\output\\20260321_180056_c60cb7\\seg_1",
+      "width": 784,
+      "height": 1144,
+      "keep_aspect_ratio": "crop",
+      "image_load_cap": 0,
+      "start_index": 0,
+      "include_subfolders": false
+    },
+    "class_type": "LoadImagesFromFolderKJ",
+    "_meta": {
+      "title": "Load Images From Folder (KJ)"
+    }
+  }
+}

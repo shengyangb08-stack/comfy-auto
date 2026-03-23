@@ -14,6 +14,7 @@ import base64
 import json
 import os
 import sys
+import time
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _KEYS_FILE = os.path.join(_SCRIPT_DIR, "api_keys.json")
@@ -68,6 +69,9 @@ the camera. This is essential for quality when chaining segments.
 FORMAT — you MUST follow this exact structure:
 - One line per second, starting from 0 up to {duration}.
 - Each line MUST begin with "(At N second:" or "(At N seconds:" and end with ")".
+- TIMELINE DENSITY: Within this {duration}-second block, at least **3 distinct seconds** \
+  (among 0–{duration}) must be **fully detailed** timestamp lines (not one-line summaries). \
+  The other seconds may be slightly shorter but must still be valid timestamp lines.
 - Inside each line, describe: camera angle/movement, subject actions, body dynamics, \
   environmental details, lighting, and any subtle motion (hair, fabric, skin, etc.).
 - Be explicit and anatomically precise for NSFW content — the model needs \
@@ -116,6 +120,7 @@ pan, or move the camera. Only subjects and environment may move.
 FORMAT — you MUST follow this exact structure:
 - One line per second, 0 to {duration}.
 - Each line MUST begin with "(At N second:" or "(At N seconds:" and end with ")".
+- TIMELINE DENSITY: At least 3 seconds in the block must be fully detailed lines.
 - Output ONLY the timestamped lines — no preamble, no explanation, no markdown.
 """
 
@@ -155,12 +160,69 @@ def _build_script_system_prompt(duration: int, excitement: int, stableness: int)
     )
 
 
+def _extract_gemini_text(response) -> str:
+    """Get text from generate_content response; raises if empty/blocked."""
+    text = getattr(response, "text", None)
+    if text and text.strip():
+        return text.strip()
+    # Fallback: candidates / parts (some SDK paths omit .text)
+    cands = getattr(response, "candidates", None) or []
+    for c in cands:
+        content = getattr(c, "content", None)
+        if content is None:
+            continue
+        parts = getattr(content, "parts", None) or []
+        for p in parts:
+            t = getattr(p, "text", None)
+            if t and str(t).strip():
+                return str(t).strip()
+    reason = getattr(cands[0], "finish_reason", None) if cands else None
+    raise RuntimeError(
+        "Gemini returned no text (empty, blocked, or safety). "
+        f"finish_reason={reason!r}. Try another image, shorten the prompt, or check API quota."
+    )
+
+
+# Retries for empty/blocked/safety responses (sometimes transient).
+_GEMINI_MAX_ATTEMPTS = 4
+_GEMINI_RETRY_DELAY_SEC = 10.0
+
+
+def _generate_gemini_content_text(
+    client,
+    *,
+    model: str,
+    contents,
+    max_attempts: int = _GEMINI_MAX_ATTEMPTS,
+    delay_sec: float = _GEMINI_RETRY_DELAY_SEC,
+) -> str:
+    """Call generate_content and extract text; retry when Gemini returns no usable text."""
+    last_err: RuntimeError | None = None
+    for attempt in range(1, max_attempts + 1):
+        response = client.models.generate_content(model=model, contents=contents)
+        try:
+            return _extract_gemini_text(response)
+        except RuntimeError as e:
+            last_err = e
+            if attempt >= max_attempts:
+                break
+            print(
+                f"Gemini attempt {attempt}/{max_attempts} failed ({e}). "
+                f"Retrying in {delay_sec}s...",
+                file=sys.stderr,
+            )
+            time.sleep(delay_sec)
+    assert last_err is not None
+    raise last_err
+
+
 def generate_prompt_grok(
     image_path: str,
     duration: int,
     api_key: str,
     excitement: int = 5,
     stableness: int = 3,
+    segment_arc: str | None = None,
 ) -> str:
     from openai import OpenAI
 
@@ -168,6 +230,12 @@ def generate_prompt_grok(
     b64, mime = image_to_base64(image_path)
     system = _build_system_prompt(duration, excitement, stableness)
 
+    user_txt = (
+        f"Generate a {duration}-second video prompt from this image "
+        f"(excitement={excitement}, stableness={stableness})."
+    )
+    if segment_arc:
+        user_txt = user_txt + "\n\n" + segment_arc.strip()
     response = client.chat.completions.create(
         model="grok-4-fast-non-reasoning",
         messages=[
@@ -175,7 +243,7 @@ def generate_prompt_grok(
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": f"Generate a {duration}-second video prompt from this image (excitement={excitement}, stableness={stableness})."},
+                    {"type": "text", "text": user_txt},
                     {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
                 ],
             },
@@ -183,7 +251,10 @@ def generate_prompt_grok(
         max_tokens=1024,
         temperature=0.9,
     )
-    return response.choices[0].message.content.strip()
+    content = response.choices[0].message.content
+    if not content:
+        raise RuntimeError("Grok returned empty content.")
+    return content.strip()
 
 
 def generate_prompt_gemini(
@@ -192,6 +263,7 @@ def generate_prompt_gemini(
     api_key: str,
     excitement: int = 5,
     stableness: int = 3,
+    segment_arc: str | None = None,
 ) -> str:
     from google import genai
     from PIL import Image
@@ -200,15 +272,17 @@ def generate_prompt_gemini(
     image = Image.open(image_path)
     system = _build_system_prompt(duration, excitement, stableness)
 
-    response = client.models.generate_content(
-        model="gemini-3-flash-preview",
-        contents=[
-            system,
-            f"Generate a {duration}-second video prompt from this image (excitement={excitement}, stableness={stableness}).",
-            image,
-        ],
+    user_msg = (
+        f"Generate a {duration}-second video prompt from this image "
+        f"(excitement={excitement}, stableness={stableness})."
     )
-    return response.text.strip()
+    if segment_arc:
+        user_msg = user_msg + "\n\n" + segment_arc.strip()
+    return _generate_gemini_content_text(
+        client,
+        model="gemini-3-flash-preview",
+        contents=[system, user_msg, image],
+    )
 
 
 def generate_prompt(
@@ -217,6 +291,7 @@ def generate_prompt(
     provider: str = "gemini",
     excitement: int = 5,
     stableness: int = 3,
+    segment_arc: str | None = None,
 ) -> str:
     keys = load_api_keys()
 
@@ -225,13 +300,17 @@ def generate_prompt(
         if not key:
             print("ERROR: Grok API key not found.", file=sys.stderr)
             sys.exit(1)
-        return generate_prompt_grok(image_path, duration, key, excitement, stableness)
+        return generate_prompt_grok(
+            image_path, duration, key, excitement, stableness, segment_arc=segment_arc,
+        )
     else:
         key = keys.get("gemini") or os.environ.get("GEMINI_API_KEY", "")
         if not key:
             print("ERROR: Gemini API key not found.", file=sys.stderr)
             sys.exit(1)
-        return generate_prompt_gemini(image_path, duration, key, excitement, stableness)
+        return generate_prompt_gemini(
+            image_path, duration, key, excitement, stableness, segment_arc=segment_arc,
+        )
 
 
 def generate_prompt_from_script(
@@ -241,6 +320,7 @@ def generate_prompt_from_script(
     provider: str = "gemini",
     excitement: int = 5,
     stableness: int = 3,
+    segment_arc: str | None = None,
 ) -> str:
     """Expand a high-level prompt into the full second-by-second format using the LLM.
 
@@ -254,6 +334,8 @@ def generate_prompt_from_script(
         f"Use the image for visual context.\n\n"
         f"HIGH-LEVEL PROMPT: {high_level_prompt}"
     )
+    if segment_arc:
+        user_text = user_text + "\n\n" + segment_arc.strip()
 
     if provider == "grok":
         key = keys.get("grok") or os.environ.get("GROK_API_KEY", "")
@@ -286,11 +368,11 @@ def generate_prompt_from_script(
         from PIL import Image
         client = genai.Client(api_key=key)
         image = Image.open(image_path)
-        response = client.models.generate_content(
+        return _generate_gemini_content_text(
+            client,
             model="gemini-3-flash-preview",
             contents=[system, user_text, image],
         )
-        return response.text.strip()
 
 
 def main():

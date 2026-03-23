@@ -1,0 +1,45 @@
+{
+  "1": {
+    "inputs": {
+      "ckpt_name": "rife49",
+      "multiplier": 2,
+      "ensemble": false,
+      "images": [
+        "2",
+        0
+      ]
+    },
+    "class_type": "FL_RIFE",
+    "_meta": {
+      "title": "FL RIFE Frame Interpolation"
+    }
+  },
+  "2": {
+    "inputs": {
+      "folder": "C:\\Users\\sheng\\Documents\\ComfyUI-aki-v3\\comfy_auto\\output\\20260321_180056_c60cb7\\seg_1",
+      "width": 784,
+      "height": 1144,
+      "keep_aspect_ratio": "crop",
+      "image_load_cap": 0,
+      "start_index": 0,
+      "include_subfolders": false
+    },
+    "class_type": "LoadImagesFromFolderKJ",
+    "_meta": {
+      "title": "Load Images From Folder (KJ)"
+    }
+  },
+  "3": {
+    "inputs": {
+      "filename_prefix": "wan22_22_00-06-01/pre_image/pre",
+      "images": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "Save Image"
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "name": "Five segments — stable → motion → more motion → climax → stable",
+  "description": "Segment 1: calm/stable. 2–3: ramp movement. 4: climax. 5: afterglow, return to stable.",
+  "segments": [
+    {
+      "segment": 1,
+      "high_level_prompt": "Calm opening: subtle breathing, small idle shifts, stable pose; no orgasm, low energy.",
+      "excitement": 4,
+      "stableness": 4
+    },
+    {
+      "segment": 2,
+      "high_level_prompt": "Clear increase in motion: hips, hands, faster rhythm; building tension; still no climax.",
+      "excitement": 6,
+      "stableness": 3
+    },
+    {
+      "segment": 3,
+      "high_level_prompt": "Peak movement before release: strongest motion so far, tension at max; do not climax yet.",
+      "excitement": 8,
+      "stableness": 2
+    },
+    {
+      "segment": 4,
+      "high_level_prompt": "She reaches orgasm: visible release, squirt if appropriate, eyes and mouth showing full climax.",
+      "excitement": 9,
+      "stableness": 4
+    },
+    {
+      "segment": 5,
+      "high_level_prompt": "Afterglow: slower movement, relaxed breathing, return to calm and stability; no second climax.",
+      "excitement": 4,
+      "stableness": 4
+    }
+  ]
+}
