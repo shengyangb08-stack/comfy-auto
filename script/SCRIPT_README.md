@@ -36,6 +36,10 @@ Example JSON scripts ship under **`script/`** (e.g. `script/script_two_segment_c
 
 - **`high_level_prompt`** (required): Your scene intent for that segment. The LLM still expands it into second-by-second lines and **prepends** this text to the generated prompt.
 - **`excitement`** / **`stableness`** (optional): Per-segment overrides for the autoprompt LLM (defaults `5` / `3` if omitted). Use higher **excitement** on the climax segment if you want more intensity.
+- **`llm_tips`** (optional): String appended to the LLM user message for **this script only** (terminology / style side notes).
+- **`llm_tips_file`** (optional): Path to a `.md` / `.txt` file (relative to the script file, or absolute). Merged with `llm_tips` and with the repo default **`../prompt_llm_tips.md`** when present.
+
+CLI: `--llm-tips path/to/extra.md` merges another file; `--no-default-llm-tips` skips the default `prompt_llm_tips.md`.
 
 See `script/script_example.json` for a longer multi-segment example.
 

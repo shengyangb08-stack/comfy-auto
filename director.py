@@ -12,7 +12,8 @@ Usage:
 Script format (script.json):
   {"segments": [{"segment": 1, "high_level_prompt": "...", "excitement": 4, "stableness": 3}, ...]}
   excitement/stableness optional (defaults: 5, 3). See script/script_example.json, script/script_two_segment_climax.json,
-  script/script_five_segment_arc.json, SCRIPT_README.md.
+  script/script_five_segment_arc.json, script/SCRIPT_README.md.
+  Optional LLM wording hints: prompt_llm_tips.md, script keys llm_tips / llm_tips_file, or --llm-tips.
 
 Requires a running ComfyUI server (default http://127.0.0.1:8188).
 """
@@ -313,6 +314,59 @@ def _load_api_keys() -> dict:
     return {}
 
 
+# ── Optional LLM “side notes” (terminology / style) merged into autoprompt ──
+
+_DEFAULT_LLM_TIPS_FILE = os.path.join(_SCRIPT_DIR, "prompt_llm_tips.md")
+
+
+def _merge_prompt_tips_for_director(
+    *,
+    script_data: dict | None,
+    script_dir: str | None,
+    extra_file: str | None,
+    use_default_file: bool,
+) -> tuple[str | None, list[str]]:
+    """Merge tips from default .md, script JSON, and --llm-tips. Returns (text or None, source labels)."""
+    chunks: list[tuple[str, str]] = []
+
+    if use_default_file and os.path.isfile(_DEFAULT_LLM_TIPS_FILE):
+        with open(_DEFAULT_LLM_TIPS_FILE, encoding="utf-8") as f:
+            t = f.read().strip()
+        if t:
+            chunks.append(("prompt_llm_tips.md", t))
+
+    if script_data:
+        rel = script_data.get("llm_tips_file")
+        if rel and script_dir:
+            path = rel if os.path.isabs(rel) else os.path.normpath(os.path.join(script_dir, rel))
+            if os.path.isfile(path):
+                with open(path, encoding="utf-8") as f:
+                    t = f.read().strip()
+                if t:
+                    chunks.append((os.path.basename(path), t))
+            else:
+                print(f"WARNING: script llm_tips_file not found: {path}", file=sys.stderr)
+        inline = script_data.get("llm_tips")
+        if isinstance(inline, str) and inline.strip():
+            chunks.append(("script llm_tips", inline.strip()))
+
+    if extra_file:
+        ef = os.path.abspath(os.path.expanduser(extra_file))
+        if not os.path.isfile(ef):
+            print(f"ERROR: --llm-tips file not found: {ef}", file=sys.stderr)
+            sys.exit(1)
+        with open(ef, encoding="utf-8") as f:
+            t = f.read().strip()
+        if t:
+            chunks.append((os.path.basename(ef), t))
+
+    if not chunks:
+        return None, []
+    merged = "\n\n---\n\n".join(text for _label, text in chunks)
+    labels = [label for label, _text in chunks]
+    return merged, labels
+
+
 # ── Main pipeline ────────────────────────────────────────────────────
 
 def build_parser() -> argparse.ArgumentParser:
@@ -343,6 +397,18 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Skip content checking entirely (faster, no QA).")
     p.add_argument("--lightning-combo", choices=["1", "2", "3"], default="2",
                    help="Lightning LoRA: 1=more motion, 2=less degradation (default), 3=balanced.")
+    p.add_argument(
+        "--llm-tips",
+        metavar="PATH",
+        default=None,
+        help="Extra .md/.txt merged into the LLM user message (after narrative arc). "
+        "Also see comfy_auto/prompt_llm_tips.md and script keys llm_tips / llm_tips_file.",
+    )
+    p.add_argument(
+        "--no-default-llm-tips",
+        action="store_true",
+        help="Do not load comfy_auto/prompt_llm_tips.md even if it exists.",
+    )
     return p
 
 
@@ -359,10 +425,13 @@ def main() -> None:
         sys.exit(1)
 
     script_entries: list[dict] | None = None
+    script_data: dict | None = None
+    script_dir: str | None = None
     if args.script:
         if not os.path.isfile(args.script):
             print(f"ERROR: Script not found: {args.script}", file=sys.stderr)
             sys.exit(1)
+        script_dir = os.path.dirname(os.path.abspath(args.script))
         with open(args.script, encoding="utf-8") as f:
             script_data = json.load(f)
         script_entries = script_data.get("segments", [])
@@ -389,6 +458,15 @@ def main() -> None:
         get_image_size,
     )
     from autoprompt import generate_prompt
+
+    prompt_tips_text, prompt_tips_labels = _merge_prompt_tips_for_director(
+        script_data=script_data,
+        script_dir=script_dir,
+        extra_file=args.llm_tips,
+        use_default_file=not args.no_default_llm_tips,
+    )
+    if prompt_tips_text:
+        print(f"  LLM prompt tips: {', '.join(prompt_tips_labels)}")
 
     if not check_server():
         print(f"ERROR: ComfyUI server not reachable at {COMFYUI_URL}")
@@ -421,6 +499,9 @@ def main() -> None:
             "max_retries": args.max_retries,
             "skip_check": args.skip_check,
             "lightning_combo": args.lightning_combo,
+            "llm_tips_sources": prompt_tips_labels,
+            "llm_tips_extra_file": args.llm_tips,
+            "no_default_llm_tips": args.no_default_llm_tips,
         },
         "segments": [],
         "final_video": None,
@@ -467,6 +548,7 @@ def main() -> None:
                 excitement=excitement,
                 stableness=stableness,
                 segment_arc=arc,
+                prompt_tips=prompt_tips_text,
             )
             current_prompt = high_level + "\n" + llm_prompt
             print(f"  Prompt (high_level + LLM):\n{current_prompt}")
@@ -482,6 +564,7 @@ def main() -> None:
                     excitement=excitement,
                     stableness=stableness,
                     segment_arc=arc,
+                    prompt_tips=prompt_tips_text,
                 )
                 print(f"  Autoprompt:\n{current_prompt}")
             else:
@@ -498,6 +581,7 @@ def main() -> None:
                 excitement=excitement,
                 stableness=stableness,
                 segment_arc=arc,
+                prompt_tips=prompt_tips_text,
             )
             print(f"  Autoprompt:\n{current_prompt}")
 

@@ -19,6 +19,11 @@ import time
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _KEYS_FILE = os.path.join(_SCRIPT_DIR, "api_keys.json")
 
+# Appended to the user message after segment_arc (director / optional files / script JSON).
+_PROMPT_TIPS_PREFIX = (
+    "ADDITIONAL TERMINOLOGY / STYLE NOTES (follow when writing; keep required timestamp format):\n"
+)
+
 _STABLENESS_INSTRUCTIONS = {
     1: "Only describe the first second (At 0 seconds: ...) in detail. For seconds 1-5, write brief lines like (At 1 seconds: Scene holds, no significant change.) (At 2 seconds: Same, static.) — the whole 5 seconds should feel mostly static with minimal movement.",
     2: "Describe seconds 0 and 1 in detail. For seconds 2-5, write that the scene holds or has minimal change.",
@@ -223,6 +228,7 @@ def generate_prompt_grok(
     excitement: int = 5,
     stableness: int = 3,
     segment_arc: str | None = None,
+    prompt_tips: str | None = None,
 ) -> str:
     from openai import OpenAI
 
@@ -236,6 +242,8 @@ def generate_prompt_grok(
     )
     if segment_arc:
         user_txt = user_txt + "\n\n" + segment_arc.strip()
+    if prompt_tips:
+        user_txt = user_txt + "\n\n" + _PROMPT_TIPS_PREFIX + prompt_tips.strip()
     response = client.chat.completions.create(
         model="grok-4-fast-non-reasoning",
         messages=[
@@ -264,6 +272,7 @@ def generate_prompt_gemini(
     excitement: int = 5,
     stableness: int = 3,
     segment_arc: str | None = None,
+    prompt_tips: str | None = None,
 ) -> str:
     from google import genai
     from PIL import Image
@@ -278,6 +287,8 @@ def generate_prompt_gemini(
     )
     if segment_arc:
         user_msg = user_msg + "\n\n" + segment_arc.strip()
+    if prompt_tips:
+        user_msg = user_msg + "\n\n" + _PROMPT_TIPS_PREFIX + prompt_tips.strip()
     return _generate_gemini_content_text(
         client,
         model="gemini-3-flash-preview",
@@ -292,6 +303,7 @@ def generate_prompt(
     excitement: int = 5,
     stableness: int = 3,
     segment_arc: str | None = None,
+    prompt_tips: str | None = None,
 ) -> str:
     keys = load_api_keys()
 
@@ -301,7 +313,13 @@ def generate_prompt(
             print("ERROR: Grok API key not found.", file=sys.stderr)
             sys.exit(1)
         return generate_prompt_grok(
-            image_path, duration, key, excitement, stableness, segment_arc=segment_arc,
+            image_path,
+            duration,
+            key,
+            excitement,
+            stableness,
+            segment_arc=segment_arc,
+            prompt_tips=prompt_tips,
         )
     else:
         key = keys.get("gemini") or os.environ.get("GEMINI_API_KEY", "")
@@ -309,7 +327,13 @@ def generate_prompt(
             print("ERROR: Gemini API key not found.", file=sys.stderr)
             sys.exit(1)
         return generate_prompt_gemini(
-            image_path, duration, key, excitement, stableness, segment_arc=segment_arc,
+            image_path,
+            duration,
+            key,
+            excitement,
+            stableness,
+            segment_arc=segment_arc,
+            prompt_tips=prompt_tips,
         )
 
 
@@ -321,6 +345,7 @@ def generate_prompt_from_script(
     excitement: int = 5,
     stableness: int = 3,
     segment_arc: str | None = None,
+    prompt_tips: str | None = None,
 ) -> str:
     """Expand a high-level prompt into the full second-by-second format using the LLM.
 
@@ -336,6 +361,8 @@ def generate_prompt_from_script(
     )
     if segment_arc:
         user_text = user_text + "\n\n" + segment_arc.strip()
+    if prompt_tips:
+        user_text = user_text + "\n\n" + _PROMPT_TIPS_PREFIX + prompt_tips.strip()
 
     if provider == "grok":
         key = keys.get("grok") or os.environ.get("GROK_API_KEY", "")
