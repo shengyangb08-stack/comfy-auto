@@ -34,3 +34,7 @@ After a full director run, the **last segment’s** saved frame batch is copied 
 Older sessions without `seg_all/` fall back to **only the highest `seg_N/`** (not a concat of every `seg_*`, which would duplicate frames when each folder is cumulative).
 
 Manifest may include `"post_edit_frames": "seg_all"`.
+
+## Remote RunPod (`director_remote.py`)
+
+Remote runs use the same `director_sessions\` layout locally, but ComfyUI I/O stays on the pod. See **`comfy_auto/REMOTE_README.md`** for SSH/secrets, CLI flags, and what gets downloaded vs kept on the pod.

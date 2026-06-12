@@ -35,3 +35,10 @@ def get_director_sessions_root() -> str:
     p = os.path.join(get_comfy_projects_root(), "comfy_auto", "director_sessions")
     os.makedirs(p, exist_ok=True)
     return p
+
+
+def get_runpod_test_sessions_root() -> str:
+    """Where run_itv_remote.py stores remote ComfyUI test runs."""
+    p = os.path.join(get_comfy_projects_root(), "comfy_auto", "runpod_test_sessions")
+    os.makedirs(p, exist_ok=True)
+    return p

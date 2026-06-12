@@ -22,6 +22,7 @@ import urllib.request
 import urllib.error
 
 COMFYUI_URL = "http://127.0.0.1:8188"
+_HTTP_HEADERS = {"User-Agent": "comfy-auto/1.0"}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ⚡ Lightning LoRA Combos (applied to both first5 and extend5 workflows)
@@ -41,7 +42,7 @@ COMFYUI_URL = "http://127.0.0.1:8188"
 # Workflow uses 3ksampler path by default.
 # ═══════════════════════════════════════════════════════════════════════════════
 
-LORA_PREFIX = "wan22\\"
+LORA_PREFIX = "wan22/"
 
 # TODO: Re-enable when we load content LoRAs selectively (not every entry in lora_metadata.json).
 LOAD_CONTENT_LORAS_FROM_METADATA = False
@@ -105,7 +106,6 @@ NODE_EXTEND5 = {
     "total_steps": "195",
     "cfg": "314",
     "pos_prompt": "788:575",
-    "prompt_string": "759",     # string_a for prompt
     "seed": "788:583",
 }
 
@@ -210,12 +210,16 @@ def _apply_lightning_combo(workflow: dict, combo: str) -> None:
     workflow[NODE_LIGHTNING_LOW]["inputs"]["strength_model"] = cfg["low_weight"]
 
 
+def _default_port(scheme: str) -> int:
+    return 443 if scheme == "https" else 8188
+
+
 def check_server() -> bool:
     import socket
     from urllib.parse import urlparse
     parsed = urlparse(COMFYUI_URL)
     host = parsed.hostname or "127.0.0.1"
-    port = parsed.port or 8188
+    port = parsed.port or _default_port(parsed.scheme)
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(3)
     try:
@@ -224,7 +228,11 @@ def check_server() -> bool:
     except (OSError, socket.timeout):
         return False
     try:
-        urllib.request.urlopen(f"{COMFYUI_URL}/system_stats", timeout=5)
+        req = urllib.request.Request(
+            f"{COMFYUI_URL}/system_stats",
+            headers=_HTTP_HEADERS,
+        )
+        urllib.request.urlopen(req, timeout=5)
         return True
     except Exception:
         return False
@@ -235,7 +243,7 @@ def queue_prompt(prompt: dict) -> dict:
     req = urllib.request.Request(
         f"{COMFYUI_URL}/prompt",
         data=payload,
-        headers={"Content-Type": "application/json"},
+        headers={**_HTTP_HEADERS, "Content-Type": "application/json"},
     )
     try:
         resp = urllib.request.urlopen(req)
@@ -249,7 +257,11 @@ def queue_prompt(prompt: dict) -> dict:
 
 def get_history(prompt_id: str) -> dict:
     try:
-        resp = urllib.request.urlopen(f"{COMFYUI_URL}/history/{prompt_id}")
+        req = urllib.request.Request(
+            f"{COMFYUI_URL}/history/{prompt_id}",
+            headers=_HTTP_HEADERS,
+        )
+        resp = urllib.request.urlopen(req)
         return json.loads(resp.read())
     except Exception:
         return {}
@@ -401,6 +413,7 @@ def run_first5(
         workflow[n["cfg"]]["inputs"]["value"] = cfg
     if filename_prefix is not None:
         workflow[n["video_combine"]]["inputs"]["filename_prefix"] = filename_prefix
+        workflow[n["save_image"]]["inputs"]["filename_prefix"] = f"{filename_prefix}/pre_image/pre"
     if latent_filename_prefix is not None:
         workflow[n["save_latent"]]["inputs"]["filename_prefix"] = latent_filename_prefix
 
@@ -451,7 +464,10 @@ def run_extend5(
     n = NODE_EXTEND5
     workflow[n["anchor_image"]]["inputs"]["image"] = anchor_image
     workflow[n["load_latent"]]["inputs"]["latent"] = prev_latent_basename
-    workflow[n["load_images_folder"]]["inputs"]["folder"] = os.path.abspath(prev_images_folder)
+    folder = prev_images_folder.replace("\\", "/")
+    if not folder.startswith("/"):
+        folder = os.path.abspath(prev_images_folder).replace("\\", "/")
+    workflow[n["load_images_folder"]]["inputs"]["folder"] = folder
 
     if width is not None and height is not None:
         workflow[n["resize_anchor"]]["inputs"]["width"] = width
@@ -460,7 +476,6 @@ def run_extend5(
         workflow[n["load_images_folder"]]["inputs"]["height"] = height
 
     workflow[n["pos_prompt"]]["inputs"]["text"] = prompt
-    workflow[n["prompt_string"]]["inputs"]["string_a"] = prompt
     workflow[n["seed"]]["inputs"]["seed"] = seed
 
     if steps is not None:
@@ -469,6 +484,7 @@ def run_extend5(
         workflow[n["cfg"]]["inputs"]["value"] = cfg
     if filename_prefix is not None:
         workflow[n["video_combine"]]["inputs"]["filename_prefix"] = filename_prefix
+        workflow[n["save_image"]]["inputs"]["filename_prefix"] = f"{filename_prefix}/pre_image/pre"
     if latent_filename_prefix is not None:
         workflow[n["save_latent"]]["inputs"]["filename_prefix"] = latent_filename_prefix
 
